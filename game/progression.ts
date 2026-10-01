@@ -1,28 +1,30 @@
-import { requiredExerciseIds } from "./data/exercises";
-import type { GameProgress, RobotMood, Stage } from "./types";
+import type { GameProgress, Stage } from "./types";
 
 export const stageOrder: Stage[] = [
-  "intro-wake", "intro-choice", "learn-salve", "learn-aqua", "terminal-aqua",
-  "learn-aperi", "terminal-valve", "repair", "terminal-flow", "facility-unlocked",
-  "placement", "epilogue", "complete",
+  "title", "morning", "less-news", "you-what", "repeat-aqua",
+  "aqua-choice", "aqua-response", "salve-terminal", "salve-explain",
+  "salve-response", "recycler-offline", "terminal-question",
+  "terminal-correct", "terminal-aperi", "water-good", "return-water", "you-six", "final",
 ];
-
-const gatedStages: Partial<Record<Stage, string>> = {
-  "learn-salve": "salve",
-  "terminal-aqua": "aqua",
-  "terminal-valve": "valve",
-  "terminal-flow": "flow",
-};
 
 export function createInitialProgress(): GameProgress {
   return {
-    version: 1,
-    stage: "intro-wake",
-    learnedWords: [],
-    completedExerciseIds: [],
-    mistakes: {},
-    facility: { status: "locked", cell: null },
-    robot: { mood: "observing", rapport: 0 },
+    version: 2,
+    stage: "title",
+    learning: {
+      aqua: "unseen",
+      salve: "unseen",
+      deest: "unseen",
+      bene: "unseen",
+      nonEst: "unseen",
+      aperi: "unseen",
+      quidRecteViator: "unseen",
+    },
+    aquaChoice: null,
+    salveChoice: null,
+    terminalAttempts: 0,
+    lastTerminalError: null,
+    askedAperi: false,
     lastSavedAt: Date.now(),
   };
 }
@@ -31,57 +33,72 @@ export function nextStage(stage: Stage): Stage {
   return stageOrder[Math.min(stageOrder.indexOf(stage) + 1, stageOrder.length - 1)];
 }
 
-export function advance(progress: GameProgress, mood?: RobotMood): GameProgress {
-  const gate = gatedStages[progress.stage];
-  if (gate && !progress.completedExerciseIds.includes(gate)) return progress;
+export function advance(progress: GameProgress): GameProgress {
+  if (["aqua-choice", "salve-explain", "terminal-question", "terminal-aperi", "final"].includes(progress.stage)) return progress;
+  const stage = nextStage(progress.stage);
+  const learning = { ...progress.learning };
+  if (stage === "less-news") learning.aqua = "encountered";
+  if (stage === "aqua-choice") learning.deest = "inferred";
+  if (stage === "recycler-offline") learning.nonEst = "inferred";
+  if (stage === "terminal-question") learning.quidRecteViator = "exposed";
+  if (stage === "terminal-aperi") learning.aperi = "encountered";
+  return { ...progress, stage, learning, lastSavedAt: Date.now() };
+}
+
+export function chooseAquaMeaning(progress: GameProgress, choice: "system" | "unclear"): GameProgress {
+  if (progress.stage !== "aqua-choice") return progress;
   return {
     ...progress,
-    stage: nextStage(progress.stage),
-    robot: { ...progress.robot, mood: mood ?? progress.robot.mood },
+    stage: "aqua-response",
+    aquaChoice: choice,
+    learning: { ...progress.learning, aqua: "inferred", deest: "inferred" },
     lastSavedAt: Date.now(),
   };
 }
 
-const learnedByExercise: Record<string, string> = {
-  salve: "salve", aqua: "aqua", valve: "aperi", flow: "currit",
-};
-
-export function completeExercise(progress: GameProgress, exerciseId: string): GameProgress {
-  if (progress.completedExerciseIds.includes(exerciseId)) return progress;
-  const word = learnedByExercise[exerciseId];
-  const completedExerciseIds = [...progress.completedExerciseIds, exerciseId];
-  const allComplete = requiredExerciseIds.every((id) => completedExerciseIds.includes(id));
+export function chooseSalveReply(progress: GameProgress, choice: "salve" | "hello"): GameProgress {
+  if (progress.stage !== "salve-explain") return progress;
   return {
     ...progress,
-    completedExerciseIds,
-    learnedWords: word && !progress.learnedWords.includes(word) ? [...progress.learnedWords, word] : progress.learnedWords,
-    facility: allComplete ? { status: "unlocked", cell: null } : progress.facility,
-    robot: { mood: "pleased", rapport: progress.robot.rapport + 1 },
+    stage: "salve-response",
+    salveChoice: choice,
+    learning: { ...progress.learning, salve: "recognized" },
     lastSavedAt: Date.now(),
   };
 }
 
-export function recordMistake(progress: GameProgress, exerciseId: string): GameProgress {
+export function recordTerminalError(progress: GameProgress, kind: "english" | "other"): GameProgress {
+  if (progress.stage !== "terminal-question") return progress;
   return {
     ...progress,
-    mistakes: { ...progress.mistakes, [exerciseId]: (progress.mistakes[exerciseId] ?? 0) + 1 },
-    robot: { ...progress.robot, mood: "alarmed" },
+    terminalAttempts: progress.terminalAttempts + (kind === "other" ? 1 : 0),
+    lastTerminalError: kind,
     lastSavedAt: Date.now(),
   };
 }
 
-export function unlockFacility(progress: GameProgress): GameProgress {
-  const ready = requiredExerciseIds.every((id) => progress.completedExerciseIds.includes(id));
-  return ready ? { ...progress, facility: { status: "unlocked", cell: null }, lastSavedAt: Date.now() } : progress;
-}
-
-export function placeFacility(progress: GameProgress, cell: number): GameProgress {
-  if (progress.facility.status !== "unlocked" || ![1, 2, 4, 5].includes(cell)) return progress;
+export function recallAqua(progress: GameProgress): GameProgress {
+  if (progress.stage !== "terminal-question") return progress;
   return {
     ...progress,
-    facility: { status: "placed", cell },
-    stage: "epilogue",
-    robot: { mood: "quiet", rapport: progress.robot.rapport + 1 },
+    stage: "terminal-correct",
+    lastTerminalError: null,
+    learning: { ...progress.learning, aqua: "recalled", quidRecteViator: "exposed" },
+    lastSavedAt: Date.now(),
+  };
+}
+
+export function askAperiMeaning(progress: GameProgress): GameProgress {
+  if (progress.stage !== "terminal-aperi") return progress;
+  return { ...progress, askedAperi: true, lastSavedAt: Date.now() };
+}
+
+export function activateControl(progress: GameProgress, control: "air" | "water" | "thermal"): GameProgress {
+  if (progress.stage !== "terminal-aperi" || control !== "water") return progress;
+  return {
+    ...progress,
+    stage: "water-good",
+    learning: { ...progress.learning, aperi: "action-understood", bene: "recognized" },
     lastSavedAt: Date.now(),
   };
 }

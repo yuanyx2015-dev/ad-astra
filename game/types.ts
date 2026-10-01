@@ -1,50 +1,45 @@
 export type Stage =
-  | "intro-wake"
-  | "intro-choice"
-  | "learn-salve"
-  | "learn-aqua"
-  | "terminal-aqua"
-  | "learn-aperi"
-  | "terminal-valve"
-  | "repair"
-  | "terminal-flow"
-  | "facility-unlocked"
-  | "placement"
-  | "epilogue"
-  | "complete";
+  | "title"
+  | "morning"
+  | "less-news"
+  | "you-what"
+  | "repeat-aqua"
+  | "no-aqua"
+  | "aqua-choice"
+  | "aqua-response"
+  | "salve-terminal"
+  | "salve-explain"
+  | "salve-choice"
+  | "salve-response"
+  | "recycler-offline"
+  | "terminal-question"
+  | "terminal-correct"
+  | "terminal-aperi"
+  | "water-good"
+  | "return-water"
+  | "you-six"
+  | "final";
 
-export type RobotMood = "observing" | "smug" | "alarmed" | "pleased" | "quiet";
+export type RobotMood = "neutral" | "amused" | "concerned" | "annoyed";
+
+export interface LearningState {
+  aqua: "unseen" | "encountered" | "inferred" | "recalled";
+  salve: "unseen" | "recognized";
+  deest: "unseen" | "inferred";
+  bene: "unseen" | "recognized";
+  nonEst: "unseen" | "exposed" | "inferred";
+  aperi: "unseen" | "encountered" | "action-understood";
+  quidRecteViator: "unseen" | "exposed";
+}
 
 export interface GameProgress {
-  version: 1;
+  version: 2;
   stage: Stage;
-  learnedWords: string[];
-  completedExerciseIds: string[];
-  mistakes: Record<string, number>;
-  facility: { status: "locked" | "unlocked" | "placed"; cell: number | null };
-  robot: { mood: RobotMood; rapport: number };
+  learning: LearningState;
+  aquaChoice: "system" | "unclear" | null;
+  salveChoice: "salve" | "hello" | null;
+  terminalAttempts: number;
+  lastTerminalError: "english" | "other" | null;
+  askedAperi: boolean;
   lastSavedAt: number;
 }
-
-export interface ChoiceExercise {
-  id: string;
-  kind: "choice";
-  prompt: string;
-  context: string;
-  options: Array<{ id: string; label: string }>;
-  correctAnswer: string;
-  hint: string;
-  success: string;
-}
-
-export interface TypedExercise {
-  id: string;
-  kind: "typed";
-  prompt: string;
-  context: string;
-  acceptedAnswers: string[];
-  hint: string;
-  success: string;
-}
-
-export type Exercise = ChoiceExercise | TypedExercise;

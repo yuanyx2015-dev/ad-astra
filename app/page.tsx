@@ -1,46 +1,33 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { assessDeterministically } from "../game/assessment";
-import { describeRobotState } from "../game/character";
-import { chapterOne, vocabulary } from "../game/data/chapter-one";
-import { exercises } from "../game/data/exercises";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { assessAquaAnswer, terminalScaffold } from "../game/assessment";
+import { robotAssets, robotMood } from "../game/character";
+import { beats, responseText } from "../game/data/chapter-one";
+import { recentDialogueReview, terminalQuestion } from "../game/data/exercises";
 import {
+  activateControl,
   advance,
-  completeExercise,
+  askAperiMeaning,
+  chooseAquaMeaning,
+  chooseSalveReply,
   createInitialProgress,
-  nextStage,
-  placeFacility,
-  recordMistake,
-  stageOrder,
+  recallAqua,
+  recordTerminalError,
 } from "../game/progression";
-import { clearGame, loadGame, saveGame } from "../game/storage";
-import type { Exercise, GameProgress } from "../game/types";
+import { loadGame, saveGame } from "../game/storage";
+import type { GameProgress } from "../game/types";
 
-const exerciseByStage: Partial<Record<GameProgress["stage"], string>> = {
-  "learn-salve": "salve",
-  "terminal-aqua": "aqua",
-  "terminal-valve": "valve",
-  "terminal-flow": "flow",
-};
-
-const terminalCopy: Record<string, string[]> = {
-  "terminal-aqua": ["SALVE, VIATOR.", "QUID DEEST?", "_"],
-  "terminal-valve": ["AQUA DEEST.", "APERI VALVAM AQUAE.", "_"],
-  repair: ["APERI VALVAM AQUAE.", "EXSPECTO…"],
-  "terminal-flow": ["AQUA CURRIT.", "STATUS: BONVS"],
-  "facility-unlocked": ["AQUA CURRIT.", "OFFICINA PARATA."],
-  placement: ["AQUA CURRIT.", "LOCVM ELIGE."],
-  epilogue: ["AQUA CURRIT.", "NOX VENIT."],
-  complete: ["AQUA CURRIT.", "CAPITVLVM I PERFECTVM."],
-};
+const terminalStages = new Set(["terminal-question", "terminal-correct", "terminal-aperi", "water-good"]);
 
 export default function Home() {
   const [progress, setProgress] = useState<GameProgress>(() => createInitialProgress());
   const [hydrated, setHydrated] = useState(false);
   const [answer, setAnswer] = useState("");
-  const [feedback, setFeedback] = useState<{ correct: boolean; text: string } | null>(null);
-  const [repairFeedback, setRepairFeedback] = useState("");
+  const [questionHelp, setQuestionHelp] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [controlError, setControlError] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setProgress(loadGame(window.localStorage));
@@ -52,231 +39,176 @@ export default function Home() {
   }, [hydrated, progress]);
 
   useEffect(() => {
-    setAnswer("");
-    setFeedback(null);
-    setRepairFeedback("");
+    if (progress.stage === "terminal-question") inputRef.current?.focus();
   }, [progress.stage]);
 
-  const beat = chapterOne[progress.stage];
-  const exerciseId = exerciseByStage[progress.stage];
-  const exercise = exerciseId ? exercises[exerciseId] : null;
-  const solved = exerciseId ? progress.completedExerciseIds.includes(exerciseId) : false;
-  const robotState = describeRobotState(progress);
-  const chapterPercent = Math.round((stageOrder.indexOf(progress.stage) / (stageOrder.length - 1)) * 100);
-  const terminalLines = terminalCopy[progress.stage] ?? ["CUSTOS CENTRALIS", "DORMIT."];
-  const placedCell = progress.facility.cell;
+  const mood = robotMood(progress);
+  const isTerminal = terminalStages.has(progress.stage);
+  const beat = responseText(progress.stage, progress.aquaChoice, progress.salveChoice) ?? beats[progress.stage] ?? null;
+  const scaffold = useMemo(() => {
+    if (!progress.lastTerminalError) return null;
+    return terminalScaffold(progress.lastTerminalError, progress.terminalAttempts);
+  }, [progress.lastTerminalError, progress.terminalAttempts]);
 
-  const objective = useMemo(() => {
-    if (progress.facility.status === "placed") return "Prepare for the arrivals";
-    if (progress.facility.status === "unlocked") return "Place the water recycler";
-    return "Restore the water recycler";
-  }, [progress.facility.status]);
-
-  function moveForward() {
-    const upcoming = nextStage(progress.stage);
-    setProgress((current) => advance(current, chapterOne[upcoming].mood));
+  function focusInput() {
+    window.requestAnimationFrame(() => inputRef.current?.focus());
   }
 
-  function chooseIntro() {
-    setProgress((current) => advance(current, "smug"));
-  }
-
-  function submitExercise(value: string, currentExercise: Exercise) {
-    if (solved) return;
-    const result = assessDeterministically(currentExercise, value);
-    setFeedback({ correct: result.correct, text: result.feedback });
-    if (result.correct) {
-      setProgress((current) => completeExercise(current, currentExercise.id));
-    } else {
-      setProgress((current) => recordMistake(current, currentExercise.id));
-    }
-  }
-
-  function submitTyped(event: FormEvent<HTMLFormElement>) {
+  function submitAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (exercise?.kind === "typed" && answer.trim()) submitExercise(answer, exercise);
-  }
-
-  function turnValve(kind: "oxygen" | "water" | "thermal") {
-    if (kind !== "water") {
-      setRepairFeedback(kind === "oxygen"
-        ? "CRAS: That line contains the air you are currently using. Bold, but no."
-        : "CRAS: Thermal loop. Useful if your ambition is warm, dry failure.");
+    const result = assessAquaAnswer(answer);
+    if (result.correct) {
+      setProgress((current) => recallAqua(current));
+      setAnswer("");
       return;
     }
-    setRepairFeedback("Valve open. The recycler shudders back to life.");
-    window.setTimeout(() => setProgress((current) => advance(current, "pleased")), 450);
+    setProgress((current) => recordTerminalError(current, result.kind === "english" ? "english" : "other"));
+    setAnswer("");
+    focusInput();
   }
 
-  function restart() {
-    if (!window.confirm("Restart Chapter I? Your current local progress will be cleared.")) return;
-    setProgress(clearGame(window.localStorage));
+  function explainQuestion() {
+    setQuestionHelp(true);
+    focusInput();
+  }
+
+  function chooseControl(control: "air" | "water" | "thermal") {
+    if (control === "water") {
+      setProgress((current) => activateControl(current, control));
+      setControlError("");
+      return;
+    }
+    setControlError(control === "air" ? "That would open the habitat air line." : "That is the thermal bleed.");
+  }
+
+  if (progress.stage === "title") {
+    return (
+      <main className="title-screen">
+        <div className="title-lockup">
+          <h1>AD ASTRA</h1>
+          <button onClick={() => setProgress((current) => advance(current))}>OPEN YOUR EYES</button>
+        </div>
+      </main>
+    );
+  }
+
+  if (isTerminal) {
+    return (
+      <main className="terminal-stage">
+        <section className="terminal-console" aria-label="CUSTOS CENTRALIS terminal">
+          <header>{terminalQuestion.heading}</header>
+
+          {progress.stage === "terminal-question" && (
+            <>
+              <div className="terminal-copy">
+                <p>{terminalQuestion.greeting}</p>
+                <p>{terminalQuestion.prompt}</p>
+                {scaffold?.terminal && <p className="terminal-reject">{scaffold.terminal}</p>}
+              </div>
+              <form className="terminal-input" onSubmit={submitAnswer}>
+                <span aria-hidden="true">&gt;</span>
+                <input
+                  ref={inputRef}
+                  value={answer}
+                  onChange={(event) => setAnswer(event.target.value)}
+                  aria-label="Latin answer"
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </form>
+              <button className="quiet-action" onClick={explainQuestion}>What does this mean?</button>
+              {(questionHelp || scaffold) && (
+                <CrasAside mood={scaffold ? "annoyed" : "neutral"}>
+                  {scaffold?.cras ?? "Quid deest? — What is missing?"}
+                  {scaffold?.offerReview && (
+                    <button className="review-button" onClick={() => { setReviewOpen(true); focusInput(); }}>Review recent dialogue</button>
+                  )}
+                </CrasAside>
+              )}
+              {reviewOpen && (
+                <div className="review-panel" role="dialog" aria-label="Recent dialogue">
+                  <div>{recentDialogueReview.map((line) => <p key={line}>{line}</p>)}</div>
+                  <button onClick={() => { setReviewOpen(false); focusInput(); }}>Return to terminal</button>
+                </div>
+              )}
+            </>
+          )}
+
+          {progress.stage === "terminal-correct" && (
+            <>
+              <div className="terminal-copy terminal-success"><p>AQUA.</p><p>RECTE.</p></div>
+              <CrasAside mood="amused">Correct.<br />I was preparing a longer explanation.<br />This outcome is personally disappointing.</CrasAside>
+              <button className="terminal-continue" onClick={() => setProgress((current) => advance(current))}>Continue</button>
+            </>
+          )}
+
+          {progress.stage === "terminal-aperi" && (
+            <>
+              <div className="terminal-copy"><p>AQUA DEEST.</p><p>APERI.</p></div>
+              {!progress.askedAperi ? (
+                <button className="quiet-action" onClick={() => setProgress((current) => askAperiMeaning(current))}>What does “aperi” mean?</button>
+              ) : (
+                <CrasAside mood="neutral">Open.</CrasAside>
+              )}
+              <div className="control-bank" aria-label="Habitat controls">
+                <button onClick={() => chooseControl("air")}><span>○</span>AIR LINE</button>
+                <button onClick={() => chooseControl("water")}><span>◇</span>AQUA VALVE</button>
+                <button onClick={() => chooseControl("thermal")}><span>△</span>THERMAL</button>
+              </div>
+              {controlError && <CrasAside mood="concerned">{controlError}</CrasAside>}
+            </>
+          )}
+
+          {progress.stage === "water-good" && (
+            <>
+              <div className="terminal-copy terminal-success"><p>AQUA: BENE</p></div>
+              <button className="terminal-continue" onClick={() => setProgress((current) => advance(current))}>Return to habitat</button>
+            </>
+          )}
+        </section>
+      </main>
+    );
   }
 
   return (
-    <main className="game-shell">
-      <header className="topbar">
-        <div className="brand"><span className="brand-mark">A</span><strong>AD ASTRA</strong></div>
-        <div className="chapter-label">CHAPTER I · AQUA <span>{chapterPercent}%</span></div>
-        <div className="top-actions">
-          <span className="save-state">● SAVED LOCALLY</span>
-          <button className="icon-button" onClick={restart} aria-label="Restart chapter" title="Restart chapter">↻</button>
-          <span className="sol">SOL 183 <b>18:42</b></span>
-        </div>
-      </header>
-
-      <section className={`scene stage-${progress.stage}`} aria-label="Mars base at twilight">
-        <div className="scene-shade" />
-        <div className="status-chip"><span className="status-pip" /> HAB-01 · PRESSURE STABLE</div>
-
-        <div className="scene-left-stack">
-          <div className="mission-card">
-            <span>PRIMARY OBJECTIVE</span>
-            <strong>{objective}</strong>
-            <small>Arrival window: 11 sols</small>
-          </div>
-
-          <section className={`terminal-mini ${beat.latinOnly ? "active" : ""}`} aria-label="Latin base computer terminal">
-            <div className="terminal-head"><span>CUSTOS CENTRALIS</span><i>{beat.latinOnly ? "ACTIVVS" : "CONEXVS"}</i></div>
-            <div className="terminal-screen">
-              {terminalLines.map((line, index) => <p key={`${line}-${index}`}>{line}</p>)}
-            </div>
-          </section>
-        </div>
-
-        <section className={`base-mini ${progress.stage === "placement" ? "expanded" : ""}`} aria-label="Base overview">
-          <div className="base-mini-head"><span>▦ BASE OVERVIEW</span><b>{progress.facility.status.toUpperCase()}</b></div>
-          <div className="map-grid">
-            {[0, 1, 2, 3, 4, 5].map((cell) => {
-              const habitat = cell === 0;
-              const occupied = placedCell === cell;
-              const placeable = progress.stage === "placement" && [1, 2, 4, 5].includes(cell);
-              return (
-                <button
-                  key={cell}
-                  className={`map-cell ${habitat ? "habitat" : ""} ${occupied ? "recycler" : ""} ${placeable ? "placeable" : ""}`}
-                  disabled={!placeable}
-                  aria-label={habitat ? "Habitat module" : occupied ? "Water recycler" : placeable ? `Place recycler on tile ${cell}` : `Empty foundation tile ${cell}`}
-                  onClick={() => setProgress((current) => placeFacility(current, cell))}
-                >
-                  {habitat ? "HAB" : occupied ? "AQUA" : placeable ? "+" : "·"}
-                </button>
-              );
-            })}
-          </div>
-          <div className="facility-row">
-            <span aria-hidden="true">{progress.facility.status === "locked" ? "×" : "◈"}</span>
-            <span>Water recycler</span><b>{progress.facility.status}</b>
-          </div>
-        </section>
-
-        {progress.stage === "repair" && (
-          <div className="valve-rack" aria-label="Recycler valve rack">
-            <div className="rack-label">MANUAL VALVE ARRAY</div>
-            <div className="valves">
-              <button onClick={() => turnValve("oxygen")}><i className="valve oxygen" />O₂ LINE</button>
-              <button onClick={() => turnValve("water")}><i className="valve water" />AQUA</button>
-              <button onClick={() => turnValve("thermal")}><i className="valve thermal" />THERMAL</button>
-            </div>
-            {repairFeedback && <p className="rack-feedback">{repairFeedback}</p>}
-          </div>
-        )}
-
-        {progress.stage === "complete" && (
-          <div className="chapter-complete-badge"><b>✦</b><span>CHAPTER I COMPLETE</span><strong>4 Latin words learned · 1 facility restored</strong></div>
-        )}
+    <main className="narrative-stage">
+      <section className="habitat-visual" aria-label="Habitat interior">
+        <div className="habitat-vignette" />
+        <img className="cras-figure" src={robotAssets[mood]} alt={`CRAS, ${mood}`} />
       </section>
 
-      <section className="story-panel">
-        <aside className={`robot-card mood-${robotState.mood}`}>
-          <div className="robot-portrait" aria-label={`CRAS is ${robotState.label.toLowerCase()}`}>
-            <div className="antenna" /><div className="robot-eye left" /><div className="robot-eye right" /><div className="robot-mouth" />
+      <section className="dialogue-surface" aria-live="polite">
+        <div className="speaker-label">{beat?.speaker ?? "CRAS"}</div>
+        <p className="dialogue-text">{beat?.text}</p>
+
+        {progress.stage === "aqua-choice" && (
+          <div className="narrative-choices">
+            <button onClick={() => setProgress((current) => chooseAquaMeaning(current, "system"))}>The water system?</button>
+            <button onClick={() => setProgress((current) => chooseAquaMeaning(current, "unclear"))}>I still don&apos;t understand.</button>
           </div>
-          <div className="robot-meta"><span>COMPANION UNIT</span><strong>CRAS</strong><small>{robotState.label}</small><em>RAPPORT · {progress.robot.rapport}</em></div>
-        </aside>
+        )}
 
-        <article className="dialogue-card" aria-live="polite">
-          <div className={`speaker ${beat.latinOnly ? "computer" : ""}`}>{beat.speaker} / {beat.channel}</div>
-          <p className={beat.latinOnly ? "latin-line" : ""}>{beat.text}</p>
-
-          {progress.stage === "intro-choice" && (
-            <div className="choice-row">
-              <button onClick={chooseIntro}>Can we fix the recycler?</button>
-              <button onClick={chooseIntro}>I object to the curriculum.</button>
-            </div>
-          )}
-
-          {exercise && (
-            <ExercisePanel
-              exercise={exercise}
-              answer={answer}
-              setAnswer={setAnswer}
-              feedback={feedback}
-              solved={solved}
-              onChoice={(value) => submitExercise(value, exercise)}
-              onSubmit={submitTyped}
-              onContinue={moveForward}
-            />
-          )}
-
-          {!exercise && progress.stage !== "intro-choice" && progress.stage !== "repair" && progress.stage !== "placement" && (
-            <button className="continue-button" onClick={progress.stage === "complete" ? restart : moveForward}>
-              {progress.stage === "complete" ? "Replay chapter" : beat.action ?? "Continue"}
-            </button>
-          )}
-        </article>
-
-        <aside className="lexicon-card">
-          <div className="lexicon-head"><span>LEXICON</span><strong>{progress.learnedWords.length} / {vocabulary.length}</strong></div>
-          <div className="word-list">
-            {vocabulary.map((word) => {
-              const known = progress.learnedWords.includes(word.latin);
-              return <div key={word.latin} className={known ? "known" : "unknown"}><b>{known ? word.latin : "••••••"}</b><span>{known ? word.english : "not yet understood"}</span></div>;
-            })}
+        {progress.stage === "salve-explain" && (
+          <div className="narrative-choices">
+            <button onClick={() => setProgress((current) => chooseSalveReply(current, "salve"))}>Salve.</button>
+            <button onClick={() => setProgress((current) => chooseSalveReply(current, "hello"))}>Hello.</button>
           </div>
-          {progress.stage === "epilogue" && <p className="untranslated-note">UNTRANSLATED · archived for later</p>}
-        </aside>
+        )}
+
+        {progress.stage !== "aqua-choice" && progress.stage !== "salve-explain" && progress.stage !== "final" && (
+          <button className="continue" onClick={() => setProgress((current) => advance(current))}>Continue</button>
+        )}
       </section>
     </main>
   );
 }
 
-function ExercisePanel({
-  exercise,
-  answer,
-  setAnswer,
-  feedback,
-  solved,
-  onChoice,
-  onSubmit,
-  onContinue,
-}: {
-  exercise: Exercise;
-  answer: string;
-  setAnswer: (value: string) => void;
-  feedback: { correct: boolean; text: string } | null;
-  solved: boolean;
-  onChoice: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onContinue: () => void;
-}) {
+function CrasAside({ mood, children }: { mood: "neutral" | "amused" | "concerned" | "annoyed"; children: React.ReactNode }) {
   return (
-    <div className="exercise-panel">
-      <div className="exercise-context">{exercise.context}</div>
-      {exercise.kind === "choice" ? (
-        <div className="choice-row">
-          {exercise.options.map((option) => (
-            <button key={option.id} disabled={solved} onClick={() => onChoice(option.id)}>{option.label}</button>
-          ))}
-        </div>
-      ) : (
-        <form className="typed-row" onSubmit={onSubmit}>
-          <label htmlFor="translation">Your interpretation</label>
-          <div><input id="translation" value={answer} disabled={solved} onChange={(event) => setAnswer(event.target.value)} placeholder="Type in English…" autoComplete="off" /><button disabled={solved || !answer.trim()}>Check</button></div>
-        </form>
-      )}
-      {feedback && <div className={`feedback ${feedback.correct ? "correct" : "retry"}`}>{feedback.correct ? "✓" : "HINT"} {feedback.text}</div>}
-      {solved && <button className="continue-button inline" onClick={onContinue}>Continue</button>}
-    </div>
+    <aside className="cras-aside">
+      <img src={robotAssets[mood]} alt="" />
+      <div><strong>CRAS</strong><p>{children}</p></div>
+    </aside>
   );
 }
