@@ -1,5 +1,5 @@
-import { markedTextsForStage } from "./content/chapter-01";
-import { collectMarkedTexts, recordHypothesis, revealMeaning, unknownLemmas, validateLemma } from "./language";
+import { chapter01, markedTextsForStage } from "./content/chapter-01";
+import { collectMarkedTexts, ensureLemmas, recordHypothesis, revealMeaning, validateLemma } from "./language";
 import type { GameProgress, LanguageLog, Stage } from "./types";
 
 export const stageOrder: Stage[] = [
@@ -26,10 +26,12 @@ export function createInitialProgress(): GameProgress {
 }
 
 export function enterStage(progress: GameProgress, stage: Stage, languageLog = progress.languageLog): GameProgress {
+  let nextLog = collectMarkedTexts(languageLog, markedTextsForStage(stage));
+  if (stage === "chapter-review") nextLog = ensureLemmas(nextLog, chapter01.languageLog.coreVocabulary);
   return {
     ...progress,
     stage,
-    languageLog: collectMarkedTexts(languageLog, markedTextsForStage(stage)),
+    languageLog: nextLog,
     lastSavedAt: Date.now(),
   };
 }
@@ -44,6 +46,13 @@ export function advance(progress: GameProgress): GameProgress {
   if (progress.stage === "salve-explain") log = revealMeaning(log, "salve", "hello");
   return enterStage(progress, nextStage(progress.stage), log);
 }
+
+export function completePrologue(progress: GameProgress): GameProgress {
+  if (progress.stage !== "crawl") return progress;
+  return enterStage(progress, "impact");
+}
+
+export const skipIntro = completePrologue;
 
 export function submitName(progress: GameProgress, name: string): GameProgress {
   if (progress.stage !== "name-prompt" || !name.trim()) return progress;
@@ -98,8 +107,30 @@ export function activateControl(progress: GameProgress, control: "air" | "water"
   );
 }
 
+export function canVerifyChapterReview(languageLog: LanguageLog): boolean {
+  return chapter01.languageLog.coreVocabulary.every((lemma) => Boolean(languageLog[lemma]?.guess.trim()));
+}
+
+export function verifyChapterReview(progress: GameProgress): GameProgress {
+  if (progress.stage !== "chapter-review" || !canVerifyChapterReview(progress.languageLog)) return progress;
+  const languageLog = chapter01.languageLog.coreVocabulary.reduce(validateLemma, progress.languageLog);
+  return { ...progress, languageLog, lastSavedAt: Date.now() };
+}
+
+export function chapterReviewCounts(languageLog: LanguageLog) {
+  const entries = chapter01.languageLog.coreVocabulary
+    .map((lemma) => languageLog[lemma])
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  const confirmed = entries.filter((entry) => entry.status === "CONFIRMED").length;
+  return {
+    discovered: entries.length,
+    confirmed,
+    revision: chapter01.languageLog.coreVocabulary.length - confirmed,
+  };
+}
+
 export function canCompleteChapterReview(languageLog: LanguageLog): boolean {
-  return unknownLemmas(languageLog).length === 0;
+  return chapter01.languageLog.coreVocabulary.every((lemma) => languageLog[lemma]?.status === "CONFIRMED");
 }
 
 export function completeChapterReview(progress: GameProgress): GameProgress {

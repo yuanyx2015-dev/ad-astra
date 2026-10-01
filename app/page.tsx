@@ -4,19 +4,24 @@ import { FormEvent, Fragment, type ReactNode, useEffect, useMemo, useRef, useSta
 import { assessAquaAnswer, terminalScaffold } from "../game/assessment";
 import { robotAssets, robotMood } from "../game/character";
 import { beatForStage, chapter01 } from "../game/content/chapter-01";
-import { parseLatinMarkup, unknownLemmas } from "../game/language";
+import { parseLatinMarkup } from "../game/language";
 import {
   activateControl,
   advance,
   askAperiMeaning,
   canCompleteChapterReview,
+  canVerifyChapterReview,
+  chapterReviewCounts,
+  completePrologue,
   completeChapterReview,
   createInitialProgress,
   recallAqua,
   recordTerminalError,
+  skipIntro,
   submitAquaHypothesis,
   submitName,
   updateLanguageLog,
+  verifyChapterReview,
 } from "../game/progression";
 import { loadGame, saveGame } from "../game/storage";
 import type { GameProgress, LanguageLogEntry, RobotMood } from "../game/types";
@@ -33,6 +38,7 @@ export default function Home() {
   const [questionHelp, setQuestionHelp] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [controlError, setControlError] = useState("");
+  const [prologuePhaseIndex, setProloguePhaseIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -48,6 +54,19 @@ export default function Home() {
     if (progress.stage === "terminal-question") inputRef.current?.focus();
     if (progress.stage === "chapter-review") setLogOpen(true);
   }, [progress.stage]);
+
+  useEffect(() => {
+    if (progress.stage !== "crawl") return;
+    const phase = chapter01.prologue.phases[prologuePhaseIndex];
+    const timer = window.setTimeout(() => {
+      if (prologuePhaseIndex === chapter01.prologue.phases.length - 1) {
+        setProgress((current) => completePrologue(current));
+      } else {
+        setProloguePhaseIndex((current) => current + 1);
+      }
+    }, phase.durationMs);
+    return () => window.clearTimeout(timer);
+  }, [progress.stage, prologuePhaseIndex]);
 
   const mood = robotMood(progress);
   const beat = beatForStage(progress.stage);
@@ -96,17 +115,22 @@ export default function Home() {
   }
 
   if (progress.stage === "crawl") {
+    const phase = chapter01.prologue.phases[prologuePhaseIndex];
     return (
-      <main className="crawl-screen">
-        <button className="skip-crawl" onClick={() => setProgress((current) => advance(current))}>{chapter01.crawl.skipLabel}</button>
-        <div className="crawl-window" aria-label="Chapter introduction">
-          <div className="crawl-track">
-            <h1>{chapter01.crawl.title}</h1>
-            <div className="crawl-chapter">{chapter01.crawl.chapter}</div>
-            {chapter01.crawl.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+      <main className={`crawl-screen prologue-${phase.id}`}>
+        {phase.id !== "impact" && phase.id !== "blackout" && (
+          <button className="skip-crawl" onClick={() => setProgress((current) => skipIntro(current))}>{chapter01.crawl.skipLabel}</button>
+        )}
+        {phase.id !== "blackout" && phase.id !== "impact" && (
+          <div className="crawl-window" aria-label="Chapter introduction">
+            <div className="crawl-track">
+              <h1>{chapter01.crawl.title}</h1>
+              <div className="crawl-chapter">{chapter01.crawl.chapter}</div>
+              {chapter01.crawl.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+            </div>
           </div>
-        </div>
-        <button className="crawl-continue" onClick={() => setProgress((current) => advance(current))}>{chapter01.crawl.continueLabel}</button>
+        )}
+        {phase.message && <div className="prologue-alert" role="status">{phase.message}</div>}
       </main>
     );
   }
@@ -114,9 +138,6 @@ export default function Home() {
   if (progress.stage === "impact") {
     return (
       <main className="impact-screen">
-        <div className="impact-status">
-          {chapter01.impact.status.map((line) => <div key={line}>{line}</div>)}
-        </div>
         <h1>AD ASTRA</h1>
         <button onClick={() => setProgress((current) => advance(current))}>{chapter01.impact.action}</button>
       </main>
@@ -257,6 +278,7 @@ export default function Home() {
           onOpen={() => setLogOpen(true)}
           onClose={() => setLogOpen(false)}
           onSave={(lemma, guess) => setProgress((current) => updateLanguageLog(current, lemma, guess))}
+          onVerify={() => setProgress((current) => verifyChapterReview(current))}
           onContinue={() => { setProgress((current) => completeChapterReview(current)); setLogOpen(false); }}
         />
       )}
@@ -281,16 +303,26 @@ function CrasAside({ mood, children }: { mood: RobotMood; children: ReactNode })
   );
 }
 
-function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave, onContinue }: {
+function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave, onVerify, onContinue }: {
   entries: LanguageLogEntry[];
   open: boolean;
   reviewMode: boolean;
   onOpen: () => void;
   onClose: () => void;
   onSave: (lemma: string, guess: string) => void;
+  onVerify: () => void;
   onContinue: () => void;
 }) {
-  const unknownCount = unknownLemmas(Object.fromEntries(entries.map((entry) => [entry.lemma, entry]))).length;
+  const languageLog = Object.fromEntries(entries.map((entry) => [entry.lemma, entry]));
+  const visibleEntries = reviewMode
+    ? chapter01.languageLog.coreVocabulary
+        .map((lemma) => languageLog[lemma])
+        .filter((entry): entry is LanguageLogEntry => Boolean(entry))
+    : entries;
+  const counts = chapterReviewCounts(languageLog);
+  const canVerify = canVerifyChapterReview(languageLog);
+  const canContinue = canCompleteChapterReview(languageLog);
+  const summary = chapter01.languageLog.reviewSummary;
   return (
     <>
       {!open && <button className="language-log-toggle" onClick={onOpen}>{chapter01.languageLog.button}</button>}
@@ -301,30 +333,67 @@ function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave,
           {!reviewMode && <button onClick={onClose}>{chapter01.languageLog.close}</button>}
         </header>
         {reviewMode && <p className="review-instruction">{chapter01.languageLog.reviewInstruction}</p>}
+        {reviewMode && (
+          <div className="review-summary" aria-live="polite">
+            <span>{summary.discovered.replace("{count}", String(counts.discovered))}</span>
+            <span>{summary.confirmed.replace("{count}", String(counts.confirmed))}</span>
+            <span>{summary.revision.replace("{count}", String(counts.revision))}</span>
+          </div>
+        )}
         <div className="log-entries">
-          {entries.length === 0 && <p>{chapter01.languageLog.empty}</p>}
-          {entries.map((entry) => <LogEntryRow key={entry.lemma} entry={entry} onSave={onSave} />)}
+          {visibleEntries.length === 0 && <p>{chapter01.languageLog.empty}</p>}
+          {visibleEntries.map((entry) => (
+            <LogEntryRow
+              key={entry.lemma}
+              entry={entry}
+              reviewMode={reviewMode}
+              hint={chapter01.languageLog.crasHints[entry.lemma as keyof typeof chapter01.languageLog.crasHints]}
+              onSave={onSave}
+            />
+          ))}
         </div>
         {reviewMode && (
-          <button className="review-continue" disabled={unknownCount > 0 || !canCompleteChapterReview(Object.fromEntries(entries.map((entry) => [entry.lemma, entry])))} onClick={onContinue}>
-            {chapter01.languageLog.reviewContinue}{unknownCount > 0 ? ` · ${unknownCount} UNKNOWN` : ""}
-          </button>
+          <div className="review-actions">
+            <button className="review-verify" disabled={!canVerify || canContinue} onClick={onVerify}>{chapter01.languageLog.reviewVerify}</button>
+            <button className="review-continue" disabled={!canContinue} onClick={onContinue}>{chapter01.languageLog.reviewContinue}</button>
+          </div>
         )}
       </aside>}
     </>
   );
 }
 
-function LogEntryRow({ entry, onSave }: { entry: LanguageLogEntry; onSave: (lemma: string, guess: string) => void }) {
+function LogEntryRow({ entry, reviewMode, hint, onSave }: {
+  entry: LanguageLogEntry;
+  reviewMode: boolean;
+  hint?: string;
+  onSave: (lemma: string, guess: string) => void;
+}) {
   const [draft, setDraft] = useState(entry.guess);
+  const [showHint, setShowHint] = useState(false);
   useEffect(() => setDraft(entry.guess), [entry.guess]);
   return (
     <form className={`log-entry status-${entry.status.toLowerCase()}`} onSubmit={(event) => { event.preventDefault(); onSave(entry.lemma, draft); }}>
-      <div className="log-entry-heading"><strong>{entry.lemma}</strong><span>{entry.status}</span></div>
+      <div className="log-entry-heading"><strong>{entry.lemma}</strong><span>{chapter01.languageLog.statusLabels[entry.status]}</span></div>
       <div className="log-entry-edit">
-        <input value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`English guess for ${entry.lemma}`} placeholder={chapter01.languageLog.guessPlaceholder} />
-        <button>{chapter01.languageLog.saveGuess}</button>
+        <input
+          value={draft}
+          onChange={(event) => {
+            const value = event.target.value;
+            setDraft(value);
+            if (reviewMode) onSave(entry.lemma, value);
+          }}
+          aria-label={`English guess for ${entry.lemma}`}
+          placeholder={chapter01.languageLog.guessPlaceholder}
+        />
+        {!reviewMode && <button>{chapter01.languageLog.saveGuess}</button>}
       </div>
+      {reviewMode && entry.status === "CONTRADICTED" && hint && (
+        <>
+          <button type="button" className="log-hint-action" onClick={() => setShowHint((current) => !current)}>{chapter01.languageLog.askCras}</button>
+          {showHint && <p className="log-hint"><strong>CRAS</strong>{hint}</p>}
+        </>
+      )}
     </form>
   );
 }

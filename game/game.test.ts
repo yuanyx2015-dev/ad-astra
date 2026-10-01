@@ -1,18 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { assessAquaAnswer, terminalScaffold } from "./assessment";
+import { chapter01 } from "./content/chapter-01";
+import { lexicon } from "./content/lexicon";
 import { collectMarkedLatin, isAcceptedGloss, normalizeGloss, recordHypothesis, validateLemma } from "./language";
 import {
   activateControl,
   canCompleteChapterReview,
+  completeChapterReview,
+  completePrologue,
   createInitialProgress,
   enterStage,
   recallAqua,
   recordTerminalError,
+  skipIntro,
   submitName,
   updateLanguageLog,
+  verifyChapterReview,
 } from "./progression";
 import { loadGame, saveGame, SAVE_KEY, type StorageLike } from "./storage";
-import type { GameProgress, LanguageLog } from "./types";
+import type { GameProgress } from "./types";
 
 class MemoryStorage implements StorageLike {
   private data = new Map<string, string>();
@@ -21,7 +27,32 @@ class MemoryStorage implements StorageLike {
   removeItem(key: string) { this.data.delete(key); }
 }
 
+function reviewProgress(overrides: Record<string, string> = {}): GameProgress {
+  let progress = enterStage(createInitialProgress(), "chapter-review");
+  for (const lemma of chapter01.languageLog.coreVocabulary) {
+    const guess = overrides[lemma] ?? lexicon[lemma].acceptedGlosses[0];
+    progress = updateLanguageLog(progress, lemma, guess);
+  }
+  return progress;
+}
+
 describe("AD ASTRA Chapter I", () => {
+  it("makes OPEN YOUR EYES the first required interaction after the automatic intro", () => {
+    const initial = createInitialProgress();
+    expect(initial.stage).toBe("crawl");
+    expect(chapter01.crawl).not.toHaveProperty("continueLabel");
+    expect(chapter01.prologue.phases.map((phase) => phase.id)).toEqual([
+      "crawl", "navigation-warning", "navigation-failure", "signal-lost", "impact", "blackout",
+    ]);
+    expect(completePrologue(initial).stage).toBe("impact");
+    expect(chapter01.impact.action).toBe("OPEN YOUR EYES");
+  });
+
+  it("sends Skip Intro directly to OPEN YOUR EYES", () => {
+    expect(skipIntro(createInitialProgress()).stage).toBe("impact");
+    expect(chapter01.impact.action).toBe("OPEN YOUR EYES");
+  });
+
   it("collects marked Latin automatically and groups inflections under one lemma", () => {
     const log = collectMarkedLatin({}, "[[aquam|aqua]] et [[aqua]]");
     expect(Object.keys(log)).toEqual(["aqua"]);
@@ -51,14 +82,25 @@ describe("AD ASTRA Chapter I", () => {
     expect(progress.languageLog.aqua.status).toBe("CONFIRMED");
   });
 
-  it("blocks chapter review only for UNKNOWN entries", () => {
-    const log: LanguageLog = {
-      aqua: { lemma: "aqua", guess: "water", status: "HYPOTHESIS", evidenceKnown: false },
-      salve: { lemma: "salve", guess: "hello", status: "CONFIRMED", evidenceKnown: true },
-      deest: { lemma: "deest", guess: "present", status: "CONTRADICTED", evidenceKnown: true },
-    };
-    expect(canCompleteChapterReview(log)).toBe(true);
-    expect(canCompleteChapterReview({ ...log, quid: { lemma: "quid", guess: "", status: "UNKNOWN", evidenceKnown: false } })).toBe(false);
+  it("turns accepted review guesses green and wrong guesses red", () => {
+    const verified = verifyChapterReview(reviewProgress({ deest: "is present" }));
+    expect(verified.languageLog.aqua.status).toBe("CONFIRMED");
+    expect(verified.languageLog.deest.status).toBe("CONTRADICTED");
+  });
+
+  it("cannot end the chapter while any core vocabulary entry is unconfirmed", () => {
+    const verified = verifyChapterReview(reviewProgress({ deest: "is present" }));
+    expect(canCompleteChapterReview(verified.languageLog)).toBe(false);
+    expect(completeChapterReview(verified).stage).toBe("chapter-review");
+  });
+
+  it("confirms a corrected red hypothesis and then allows the chapter to continue", () => {
+    let progress = verifyChapterReview(reviewProgress({ deest: "is present" }));
+    expect(progress.languageLog.deest.status).toBe("CONTRADICTED");
+    progress = updateLanguageLog(progress, "deest", "is absent");
+    expect(progress.languageLog.deest.status).toBe("CONFIRMED");
+    expect(canCompleteChapterReview(progress.languageLog)).toBe(true);
+    expect(completeChapterReview(progress).stage).toBe("ending-now");
   });
 
   it("persists the restored water visual state", () => {

@@ -42,6 +42,16 @@ export function collectMarkedTexts(log: LanguageLog, texts: string[]): LanguageL
   return texts.reduce(collectMarkedLatin, log);
 }
 
+export function ensureLemmas(log: LanguageLog, lemmas: readonly string[]): LanguageLog {
+  let next = log;
+  for (const lemma of lemmas) {
+    if (next[lemma]) continue;
+    if (next === log) next = { ...log };
+    next[lemma] = { lemma, guess: "", status: "UNKNOWN", evidenceKnown: false };
+  }
+  return next;
+}
+
 export function isAcceptedGloss(lemma: string, guess: string): boolean {
   const normalized = normalizeGloss(guess);
   return (lexicon[lemma]?.acceptedGlosses ?? []).some((gloss) => normalizeGloss(gloss) === normalized);
