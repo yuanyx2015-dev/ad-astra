@@ -8,3 +8,4 @@
 - Never merge a pull request into `main` without my explicit instruction. Open the PR and stop for review.
 - Never delete a local or remote working branch until its commits are confirmed present in `origin/main` after the merge.
 - Never use force push on any branch.
+- Follow `docs/ASSET_STRUCTURE.md` when adding or organizing visual assets.
