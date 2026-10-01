@@ -1,45 +1,54 @@
 export type Stage =
-  | "title"
-  | "morning"
-  | "less-news"
-  | "you-what"
-  | "repeat-aqua"
-  | "no-aqua"
-  | "aqua-choice"
-  | "aqua-response"
-  | "salve-terminal"
+  | "crawl"
+  | "impact"
+  | "wake-salve"
   | "salve-explain"
-  | "salve-choice"
-  | "salve-response"
+  | "name-prompt"
+  | "name-ack"
+  | "name-objection"
+  | "name-joke"
+  | "good-news"
+  | "less-news"
+  | "no-aqua"
+  | "aqua-guess"
   | "recycler-offline"
   | "terminal-question"
   | "terminal-correct"
   | "terminal-aperi"
   | "water-good"
   | "return-water"
-  | "you-six"
-  | "final";
+  | "chapter-review"
+  | "ending-now"
+  | "ending-crashed"
+  | "ending-noticed"
+  | "ending-observant"
+  | "ending-why"
+  | "ending-log"
+  | "ending-convenient"
+  | "ending-defense"
+  | "ending-power"
+  | "chapter-end";
 
 export type RobotMood = "neutral" | "amused" | "concerned" | "annoyed";
+export type LogStatus = "UNKNOWN" | "HYPOTHESIS" | "CONFIRMED" | "CONTRADICTED";
 
-export interface LearningState {
-  aqua: "unseen" | "encountered" | "inferred" | "recalled";
-  salve: "unseen" | "recognized";
-  deest: "unseen" | "inferred";
-  bene: "unseen" | "recognized";
-  nonEst: "unseen" | "exposed" | "inferred";
-  aperi: "unseen" | "encountered" | "action-understood";
-  quidRecteViator: "unseen" | "exposed";
+export interface LanguageLogEntry {
+  lemma: string;
+  guess: string;
+  status: LogStatus;
+  evidenceKnown: boolean;
 }
 
+export type LanguageLog = Record<string, LanguageLogEntry>;
+
 export interface GameProgress {
-  version: 2;
+  version: 3;
   stage: Stage;
-  learning: LearningState;
-  aquaChoice: "system" | "unclear" | null;
-  salveChoice: "salve" | "hello" | null;
+  playerName: string;
+  languageLog: LanguageLog;
   terminalAttempts: number;
   lastTerminalError: "english" | "other" | null;
   askedAperi: boolean;
+  waterRestored: boolean;
   lastSavedAt: number;
 }

@@ -1,7 +1,7 @@
 import { createInitialProgress, stageOrder } from "./progression";
 import type { GameProgress } from "./types";
 
-export const SAVE_KEY = "ad-astra.opening.v2";
+export const SAVE_KEY = "ad-astra.chapter-01.v3";
 
 export interface StorageLike {
   getItem(key: string): string | null;
@@ -18,8 +18,9 @@ export function loadGame(storage: StorageLike): GameProgress {
   if (!raw) return createInitialProgress();
   try {
     const parsed = JSON.parse(raw) as Partial<GameProgress>;
-    if (parsed.version !== 2 || !parsed.stage || !stageOrder.includes(parsed.stage)) return createInitialProgress();
-    if (!parsed.learning || typeof parsed.terminalAttempts !== "number") return createInitialProgress();
+    if (parsed.version !== 3 || !parsed.stage || !stageOrder.includes(parsed.stage)) return createInitialProgress();
+    if (typeof parsed.playerName !== "string" || !parsed.languageLog || typeof parsed.languageLog !== "object") return createInitialProgress();
+    if (typeof parsed.waterRestored !== "boolean" || typeof parsed.terminalAttempts !== "number") return createInitialProgress();
     return parsed as GameProgress;
   } catch {
     return createInitialProgress();
