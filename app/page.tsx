@@ -58,6 +58,7 @@ export default function Home() {
   useEffect(() => {
     if (progress.stage !== "crawl") return;
     const phase = chapter01.prologue.phases[prologuePhaseIndex];
+    if (phase.id === "crawl") return;
     const timer = window.setTimeout(() => {
       if (prologuePhaseIndex === chapter01.prologue.phases.length - 1) {
         setProgress((current) => completePrologue(current));
@@ -117,13 +118,22 @@ export default function Home() {
   if (progress.stage === "crawl") {
     const phase = chapter01.prologue.phases[prologuePhaseIndex];
     return (
-      <main className={`crawl-screen prologue-${phase.id}`}>
+      <main
+        className={`crawl-screen prologue-${phase.id}`}
+        style={phase.id === "impact" ? { animationDuration: `${phase.durationMs}ms` } : undefined}
+      >
         {phase.id !== "impact" && phase.id !== "blackout" && (
           <button className="skip-crawl" onClick={() => setProgress((current) => skipIntro(current))}>{chapter01.crawl.skipLabel}</button>
         )}
         {phase.id !== "blackout" && phase.id !== "impact" && (
           <div className="crawl-window" aria-label="Chapter introduction">
-            <div className="crawl-track">
+            <div
+              className="crawl-track"
+              style={{ animationDuration: `${chapter01.crawl.durationMs}ms` }}
+              onAnimationEnd={() => {
+                if (phase.id === "crawl") setProloguePhaseIndex((current) => current + 1);
+              }}
+            >
               <h1>{chapter01.crawl.title}</h1>
               <div className="crawl-chapter">{chapter01.crawl.chapter}</div>
               {chapter01.crawl.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}

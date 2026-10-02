@@ -41,8 +41,11 @@ describe("AD ASTRA Chapter I", () => {
     const initial = createInitialProgress();
     expect(initial.stage).toBe("crawl");
     expect(chapter01.crawl).not.toHaveProperty("continueLabel");
+    expect(chapter01.crawl.durationMs).toBeGreaterThanOrEqual(18000);
+    expect(chapter01.crawl.durationMs).toBeLessThanOrEqual(20000);
+    expect(chapter01.crawl.paragraphs.join(" ").toLowerCase()).not.toMatch(/navigation|fall|impact|crash/);
     expect(chapter01.prologue.phases.map((phase) => phase.id)).toEqual([
-      "crawl", "navigation-warning", "navigation-failure", "signal-lost", "impact", "blackout",
+      "crawl", "calm", "navigation-warning", "navigation-failure", "signal-lost", "impact", "blackout",
     ]);
     expect(completePrologue(initial).stage).toBe("impact");
     expect(chapter01.impact.action).toBe("OPEN YOUR EYES");
