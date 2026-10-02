@@ -8,10 +8,8 @@ export const robotAssets: Record<RobotMood, string> = {
 };
 
 export function robotMood(progress: GameProgress): RobotMood {
-  if (progress.stage === "aqua-response") return progress.aquaChoice === "system" ? "amused" : "annoyed";
-  if (progress.stage === "salve-response") return progress.salveChoice === "salve" ? "amused" : "annoyed";
-  if (["less-news", "no-aqua", "recycler-offline"].includes(progress.stage)) return "concerned";
-  if (["repeat-aqua", "terminal-question"].includes(progress.stage) && progress.terminalAttempts > 0) return "annoyed";
-  if (["salve-explain", "terminal-correct", "return-water", "final"].includes(progress.stage)) return "amused";
+  if (["less-news", "recycler-offline", "ending-log", "ending-power"].includes(progress.stage)) return "concerned";
+  if (progress.stage === "terminal-question" && progress.lastTerminalError) return "annoyed";
+  if (["name-joke", "terminal-correct", "ending-observant", "ending-defense"].includes(progress.stage)) return "amused";
   return "neutral";
 }

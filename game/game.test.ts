@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { assessAquaAnswer, terminalScaffold } from "./assessment";
+import { chapter01 } from "./content/chapter-01";
+import { lexicon } from "./content/lexicon";
+import { assessGloss, collectMarkedLatin, displayGloss, isAcceptedGloss, normalizeGloss, recordHypothesis, validateLemma } from "./language";
 import {
   activateControl,
-  advance,
-  chooseAquaMeaning,
-  chooseSalveReply,
+  canCompleteChapterReview,
+  completeChapterReview,
+  completePrologue,
   createInitialProgress,
+  enterStage,
   recallAqua,
   recordTerminalError,
+  requestReviewHelp,
+  skipIntro,
+  submitName,
+  updateLanguageLog,
+  verifyChapterReview,
 } from "./progression";
 import { loadGame, saveGame, SAVE_KEY, type StorageLike } from "./storage";
 import type { GameProgress } from "./types";
@@ -19,72 +28,150 @@ class MemoryStorage implements StorageLike {
   removeItem(key: string) { this.data.delete(key); }
 }
 
-describe("approved opening flow", () => {
-  it("starts on the title screen and gates narrative choices", () => {
-    let progress = createInitialProgress();
-    expect(progress.stage).toBe("title");
-    for (let index = 0; index < 5; index += 1) progress = advance(progress);
-    expect(progress.stage).toBe("aqua-choice");
-    expect(advance(progress)).toBe(progress);
+function reviewProgress(overrides: Record<string, string> = {}): GameProgress {
+  let progress = enterStage(createInitialProgress(), "chapter-review");
+  for (const lemma of chapter01.languageLog.coreVocabulary) {
+    const guess = overrides[lemma] ?? lexicon[lemma].acceptedGlosses[0];
+    progress = updateLanguageLog(progress, lemma, guess);
+  }
+  return progress;
+}
+
+describe("AD ASTRA Chapter I", () => {
+  it("makes OPEN YOUR EYES the first required interaction after the automatic intro", () => {
+    const initial = createInitialProgress();
+    expect(initial.stage).toBe("crawl");
+    expect(chapter01.crawl).not.toHaveProperty("continueLabel");
+    expect(chapter01.crawl.durationMs).toBeGreaterThanOrEqual(18000);
+    expect(chapter01.crawl.durationMs).toBeLessThanOrEqual(20000);
+    expect(chapter01.crawl.paragraphs.join(" ").toLowerCase()).not.toMatch(/navigation|fall|impact|crash/);
+    expect(chapter01.prologue.phases.map((phase) => phase.id)).toEqual([
+      "crawl", "calm", "navigation-warning", "navigation-failure", "signal-lost", "impact", "blackout",
+    ]);
+    expect(completePrologue(initial).stage).toBe("impact");
+    expect(chapter01.impact.action).toBe("OPEN YOUR EYES");
   });
 
-  it("tracks inferred aqua and recognized salve internally", () => {
-    let progress = createInitialProgress();
-    for (let index = 0; index < 5; index += 1) progress = advance(progress);
-    progress = chooseAquaMeaning(progress, "system");
-    expect(progress.learning.aqua).toBe("inferred");
-    expect(progress.learning.deest).toBe("inferred");
-    progress = advance(progress);
-    progress = advance(progress);
-    progress = chooseSalveReply(progress, "salve");
-    expect(progress.learning.salve).toBe("recognized");
+  it("sends Skip Intro directly to OPEN YOUR EYES", () => {
+    expect(skipIntro(createInitialProgress()).stage).toBe("impact");
+    expect(chapter01.impact.action).toBe("OPEN YOUR EYES");
   });
 
-  it("accepts aqua case-insensitively while ignoring spaces and a final period", () => {
-    expect(assessAquaAnswer("  A Q U A. ").correct).toBe(true);
-    expect(assessAquaAnswer("water")).toMatchObject({ correct: false, kind: "english" });
+  it("collects marked Latin automatically and groups inflections under one lemma", () => {
+    const log = collectMarkedLatin({}, "[[aquam|aqua]] et [[aqua]]");
+    expect(Object.keys(log)).toEqual(["aqua"]);
+    expect(log.aqua).toMatchObject({ lemma: "aqua", status: "UNKNOWN" });
   });
 
-  it("uses the required wrong-answer scaffolding without showing the answer", () => {
-    expect(terminalScaffold("english", 1)).toMatchObject({ terminal: "IGNOTUM.", cras: "It remains stubbornly Latin." });
-    expect(terminalScaffold("other", 1).cras).toBe("Consider the system that is failing.");
-    expect(terminalScaffold("other", 2).cras).toBe("The recycler is dry.");
-    expect(terminalScaffold("other", 3).cras).toBe("You encountered the relevant word earlier.");
-    expect(terminalScaffold("other", 4).offerReview).toBe(true);
+  it("moves entries through hypothesis, confirmed, and contradicted states", () => {
+    const encountered = collectMarkedLatin({}, "[[aqua]] [[deest]]");
+    const yellow = recordHypothesis(encountered, "aqua", "water");
+    expect(yellow.aqua.status).toBe("HYPOTHESIS");
+    expect(validateLemma(yellow, "aqua").aqua.status).toBe("CONFIRMED");
+    const wrong = recordHypothesis(encountered, "deest", "is present");
+    expect(validateLemma(wrong, "deest").deest.status).toBe("CONTRADICTED");
   });
 
-  it("does not let the special English error skip the other-error hints", () => {
-    const terminal = { ...createInitialProgress(), stage: "terminal-question" as const };
-    const afterEnglish = recordTerminalError(terminal, "english");
-    const firstOther = recordTerminalError(afterEnglish, "other");
-    expect(firstOther.terminalAttempts).toBe(1);
-    expect(terminalScaffold("other", firstOther.terminalAttempts).cras).toBe("Consider the system that is failing.");
+  it("normalizes punctuation, capitalization, spacing, and accepted synonyms", () => {
+    expect(normalizeGloss("  Is   Missing! ")).toBe("is missing");
+    expect(isAcceptedGloss("deest", "IS ABSENT.")).toBe(true);
+    expect(isAcceptedGloss("viator", "Traveller")).toBe(true);
+    expect(assessGloss("deest", "is missing")).toBe("exact");
+    expect(assessGloss("deest", "not have")).toBe("close");
+    expect(assessGloss("deest", "is present")).toBe("incorrect");
   });
 
-  it("keeps the terminal gated until aqua is recalled", () => {
-    let progress: GameProgress = { ...createInitialProgress(), stage: "terminal-question" };
-    progress = recordTerminalError(progress, "other");
-    expect(progress.stage).toBe("terminal-question");
+  it("confirms the yellow aqua hypothesis after successful terminal use", () => {
+    let progress = enterStage(createInitialProgress(), "terminal-question", collectMarkedLatin({}, "[[aqua]]"));
+    progress = updateLanguageLog(progress, "aqua", "water");
+    expect(progress.languageLog.aqua.status).toBe("HYPOTHESIS");
     progress = recallAqua(progress);
-    expect(progress.stage).toBe("terminal-correct");
-    expect(progress.learning.aqua).toBe("recalled");
+    expect(progress.languageLog.aqua.status).toBe("CONFIRMED");
   });
 
-  it("requires the water control for the aperi action", () => {
-    const progress = { ...createInitialProgress(), stage: "terminal-aperi" as const };
-    expect(activateControl(progress, "air")).toBe(progress);
-    const repaired = activateControl(progress, "water");
-    expect(repaired.stage).toBe("water-good");
-    expect(repaired.learning.aperi).toBe("action-understood");
-    expect(repaired.learning.bene).toBe("recognized");
+  it("turns accepted review guesses green and wrong guesses red", () => {
+    const verified = verifyChapterReview(reviewProgress({ deest: "is present" }));
+    expect(verified.languageLog.aqua.status).toBe("CONFIRMED");
+    expect(verified.languageLog.deest.status).toBe("CONTRADICTED");
   });
 
-  it("round-trips v2 saves and rejects the old chapter save shape", () => {
+  it("accepts an approximate answer but displays the canonical gloss", () => {
+    const verified = verifyChapterReview(reviewProgress({ deest: "not have" }));
+    const entry = verified.languageLog.deest;
+    expect(entry).toMatchObject({ status: "CONFIRMED", matchQuality: "close", playerGuess: "not have" });
+    expect(displayGloss(entry)).toBe("is missing; is lacking");
+    expect(displayGloss(entry)).not.toBe(entry.playerGuess);
+  });
+
+  it("progressive review help reveals the canonical meaning without autofilling", () => {
+    let progress = verifyChapterReview(reviewProgress({ viator: "machine" }));
+    const playerGuess = progress.languageLog.viator.playerGuess;
+    progress = requestReviewHelp(progress, "viator");
+    expect(progress.languageLog.viator.helpLevel).toBe(1);
+    progress = requestReviewHelp(progress, "viator");
+    progress = requestReviewHelp(progress, "viator");
+    expect(progress.languageLog.viator).toMatchObject({ helpLevel: 3, canonicalRevealed: true, playerGuess });
+    expect(chapter01.languageLog.crasHints.viator[2]).toContain(lexicon.viator.canonicalGloss);
+    progress = updateLanguageLog(progress, "viator", "traveller");
+    expect(progress.languageLog.viator.status).toBe("CONFIRMED");
+  });
+
+  it("cannot end the chapter while any core vocabulary entry is unconfirmed", () => {
+    const verified = verifyChapterReview(reviewProgress({ deest: "is present" }));
+    expect(canCompleteChapterReview(verified.languageLog)).toBe(false);
+    expect(completeChapterReview(verified).stage).toBe("chapter-review");
+  });
+
+  it("confirms a corrected red hypothesis and then allows the chapter to continue", () => {
+    let progress = verifyChapterReview(reviewProgress({ deest: "is present" }));
+    expect(progress.languageLog.deest.status).toBe("CONTRADICTED");
+    progress = updateLanguageLog(progress, "deest", "is absent");
+    expect(progress.languageLog.deest.status).toBe("CONFIRMED");
+    expect(canCompleteChapterReview(progress.languageLog)).toBe(true);
+    expect(completeChapterReview(progress).stage).toBe("ending-now");
+  });
+
+  it("requires all ten canonical entries to be confirmed before completion", () => {
+    const verified = verifyChapterReview(reviewProgress());
+    expect(canCompleteChapterReview(verified.languageLog)).toBe(true);
+    expect(chapter01.languageLog.coreVocabulary.every((lemma) => {
+      const entry = verified.languageLog[lemma];
+      return entry.status === "CONFIRMED" && displayGloss(entry) === lexicon[lemma].canonicalGloss;
+    })).toBe(true);
+  });
+
+  it("persists the restored water visual state", () => {
     const storage = new MemoryStorage();
-    const progress = advance(createInitialProgress());
+    let progress = enterStage(createInitialProgress(), "terminal-aperi", collectMarkedLatin({}, "[[aperi]]"));
+    progress = activateControl(progress, "water");
+    expect(progress.waterRestored).toBe(true);
     saveGame(storage, progress);
-    expect(loadGame(storage).stage).toBe("morning");
-    storage.setItem(SAVE_KEY, JSON.stringify({ version: 1, stage: "intro-wake" }));
-    expect(loadGame(storage).stage).toBe("title");
+    expect(loadGame(storage).waterRestored).toBe(true);
+  });
+
+  it("progressively reveals the terminal answer so the puzzle cannot dead-end", () => {
+    expect(assessAquaAnswer("  A Q U A. ").correct).toBe(true);
+    expect(terminalScaffold("english", 1)).toMatchObject({ terminal: "IGNOTUM.", cras: "The recycler was supposed to provide it." });
+    expect(terminalScaffold("other", 2).cras).toBe("Humans drink it.");
+    expect(terminalScaffold("other", 3)).toMatchObject({
+      cras: "Aqua means water. Enter aqua into the Master Computer.",
+      directReveal: true,
+    });
+    expect(terminalScaffold("other", 8).directReveal).toBe(true);
+
+    const terminal = enterStage(createInitialProgress(), "terminal-question");
+    const afterEnglish = recordTerminalError(terminal, "english");
+    expect(recordTerminalError(afterEnglish, "other").terminalAttempts).toBe(2);
+  });
+
+  it("round-trips the player name and Language Log", () => {
+    const storage = new MemoryStorage();
+    let progress: GameProgress = enterStage(createInitialProgress(), "name-prompt");
+    progress = submitName(progress, "Alex");
+    progress = { ...progress, languageLog: recordHypothesis(collectMarkedLatin({}, "[[aqua]]"), "aqua", "water") };
+    saveGame(storage, progress);
+    expect(loadGame(storage)).toMatchObject({ playerName: "Alex", languageLog: { aqua: { playerGuess: "water", status: "HYPOTHESIS" } } });
+    storage.setItem(SAVE_KEY, JSON.stringify({ version: 2, stage: "title" }));
+    expect(loadGame(storage).stage).toBe("crawl");
   });
 });
