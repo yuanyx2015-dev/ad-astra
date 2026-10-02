@@ -13,7 +13,7 @@ export const stageOrder: Stage[] = [
 
 export function createInitialProgress(): GameProgress {
   return {
-    version: 3,
+    version: 4,
     stage: "crawl",
     playerName: "",
     languageLog: {},
@@ -43,7 +43,7 @@ export function nextStage(stage: Stage): Stage {
 export function advance(progress: GameProgress): GameProgress {
   if (["name-prompt", "aqua-guess", "terminal-question", "terminal-aperi", "chapter-review", "chapter-end"].includes(progress.stage)) return progress;
   let log = progress.languageLog;
-  if (progress.stage === "salve-explain") log = revealMeaning(log, "salve", "hello");
+  if (progress.stage === "salve-explain") log = revealMeaning(log, "salve");
   return enterStage(progress, nextStage(progress.stage), log);
 }
 
@@ -73,7 +73,7 @@ export function recordTerminalError(progress: GameProgress, kind: "english" | "o
   if (progress.stage !== "terminal-question") return progress;
   return {
     ...progress,
-    terminalAttempts: progress.terminalAttempts + (kind === "other" ? 1 : 0),
+    terminalAttempts: progress.terminalAttempts + 1,
     lastTerminalError: kind,
     lastSavedAt: Date.now(),
   };
@@ -93,7 +93,7 @@ export function askAperiMeaning(progress: GameProgress): GameProgress {
   return {
     ...progress,
     askedAperi: true,
-    languageLog: revealMeaning(progress.languageLog, "aperi", "open"),
+    languageLog: revealMeaning(progress.languageLog, "aperi"),
     lastSavedAt: Date.now(),
   };
 }
@@ -108,7 +108,29 @@ export function activateControl(progress: GameProgress, control: "air" | "water"
 }
 
 export function canVerifyChapterReview(languageLog: LanguageLog): boolean {
-  return chapter01.languageLog.coreVocabulary.every((lemma) => Boolean(languageLog[lemma]?.guess.trim()));
+  return chapter01.languageLog.coreVocabulary.every((lemma) => Boolean(languageLog[lemma]?.playerGuess.trim()));
+}
+
+export function requestReviewHelp(progress: GameProgress, lemma: string): GameProgress {
+  if (progress.stage !== "chapter-review") return progress;
+  const current = progress.languageLog[lemma];
+  const hints = chapter01.languageLog.crasHints[lemma as keyof typeof chapter01.languageLog.crasHints];
+  if (!current || current.status === "CONFIRMED" || !hints) return progress;
+  const helpLevel = Math.min(current.helpLevel + 1, hints.length);
+  const languageLog = {
+    ...progress.languageLog,
+    [lemma]: {
+      ...current,
+      helpLevel,
+      canonicalRevealed: helpLevel === hints.length || current.canonicalRevealed,
+      evidenceKnown: helpLevel === hints.length || current.evidenceKnown,
+    },
+  };
+  return {
+    ...progress,
+    languageLog: helpLevel === hints.length ? validateLemma(languageLog, lemma) : languageLog,
+    lastSavedAt: Date.now(),
+  };
 }
 
 export function verifyChapterReview(progress: GameProgress): GameProgress {
@@ -130,7 +152,10 @@ export function chapterReviewCounts(languageLog: LanguageLog) {
 }
 
 export function canCompleteChapterReview(languageLog: LanguageLog): boolean {
-  return chapter01.languageLog.coreVocabulary.every((lemma) => languageLog[lemma]?.status === "CONFIRMED");
+  return chapter01.languageLog.coreVocabulary.every((lemma) => {
+    const entry = languageLog[lemma];
+    return entry?.status === "CONFIRMED" && Boolean(entry.canonicalGloss);
+  });
 }
 
 export function completeChapterReview(progress: GameProgress): GameProgress {

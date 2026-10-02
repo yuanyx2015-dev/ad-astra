@@ -403,7 +403,10 @@ button { touch-action:manipulation; }
 .log-entry-edit { display:flex; gap:7px; }
 .log-entry-edit input { flex:1; min-width:0; border:0; border-bottom:1px solid #345052; outline:0; background:transparent; color:#e3ecea; padding:8px 2px; font-family:Georgia,"Times New Roman",serif; font-size:1rem; }
 .log-entry-edit button { border:1px solid #345052; background:transparent; color:#91aaa9; padding:7px 9px; font-size:.68rem; cursor:pointer; }
+.confirmed-gloss { color:#b7ebcd; font-family:Georgia,"Times New Roman",serif; font-size:1.05rem; line-height:1.4; }
+.log-feedback { margin:10px 0 0; color:#9fb4b0; font-family:Georgia,"Times New Roman",serif; font-size:.86rem; line-height:1.4; }
 .log-hint-action { margin-top:10px; padding:0; border:0; background:transparent; color:#c88d6a; font-family:"Courier New",ui-monospace,monospace; font-size:.68rem; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+.log-hint-action:disabled { color:#71807d; cursor:default; text-decoration:none; }
 .log-hint { margin:10px 0 0; padding:10px; border-left:2px solid #6b533b; color:#c8d2cf; font-family:Georgia,"Times New Roman",serif; font-size:.9rem; line-height:1.45; }
 .log-hint strong { display:block; margin-bottom:4px; color:var(--amber); font-family:"Courier New",ui-monospace,monospace; font-size:.62rem; letter-spacing:.12em; }
 .review-actions { display:grid; grid-template-columns:1fr 1.5fr; gap:9px; }

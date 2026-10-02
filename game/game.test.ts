@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assessAquaAnswer, terminalScaffold } from "./assessment";
 import { chapter01 } from "./content/chapter-01";
 import { lexicon } from "./content/lexicon";
-import { collectMarkedLatin, isAcceptedGloss, normalizeGloss, recordHypothesis, validateLemma } from "./language";
+import { assessGloss, collectMarkedLatin, displayGloss, isAcceptedGloss, normalizeGloss, recordHypothesis, validateLemma } from "./language";
 import {
   activateControl,
   canCompleteChapterReview,
@@ -12,6 +12,7 @@ import {
   enterStage,
   recallAqua,
   recordTerminalError,
+  requestReviewHelp,
   skipIntro,
   submitName,
   updateLanguageLog,
@@ -75,6 +76,9 @@ describe("AD ASTRA Chapter I", () => {
     expect(normalizeGloss("  Is   Missing! ")).toBe("is missing");
     expect(isAcceptedGloss("deest", "IS ABSENT.")).toBe(true);
     expect(isAcceptedGloss("viator", "Traveller")).toBe(true);
+    expect(assessGloss("deest", "is missing")).toBe("exact");
+    expect(assessGloss("deest", "not have")).toBe("close");
+    expect(assessGloss("deest", "is present")).toBe("incorrect");
   });
 
   it("confirms the yellow aqua hypothesis after successful terminal use", () => {
@@ -89,6 +93,27 @@ describe("AD ASTRA Chapter I", () => {
     const verified = verifyChapterReview(reviewProgress({ deest: "is present" }));
     expect(verified.languageLog.aqua.status).toBe("CONFIRMED");
     expect(verified.languageLog.deest.status).toBe("CONTRADICTED");
+  });
+
+  it("accepts an approximate answer but displays the canonical gloss", () => {
+    const verified = verifyChapterReview(reviewProgress({ deest: "not have" }));
+    const entry = verified.languageLog.deest;
+    expect(entry).toMatchObject({ status: "CONFIRMED", matchQuality: "close", playerGuess: "not have" });
+    expect(displayGloss(entry)).toBe("is missing; is lacking");
+    expect(displayGloss(entry)).not.toBe(entry.playerGuess);
+  });
+
+  it("progressive review help reveals the canonical meaning without autofilling", () => {
+    let progress = verifyChapterReview(reviewProgress({ viator: "machine" }));
+    const playerGuess = progress.languageLog.viator.playerGuess;
+    progress = requestReviewHelp(progress, "viator");
+    expect(progress.languageLog.viator.helpLevel).toBe(1);
+    progress = requestReviewHelp(progress, "viator");
+    progress = requestReviewHelp(progress, "viator");
+    expect(progress.languageLog.viator).toMatchObject({ helpLevel: 3, canonicalRevealed: true, playerGuess });
+    expect(chapter01.languageLog.crasHints.viator[2]).toContain(lexicon.viator.canonicalGloss);
+    progress = updateLanguageLog(progress, "viator", "traveller");
+    expect(progress.languageLog.viator.status).toBe("CONFIRMED");
   });
 
   it("cannot end the chapter while any core vocabulary entry is unconfirmed", () => {
@@ -106,6 +131,15 @@ describe("AD ASTRA Chapter I", () => {
     expect(completeChapterReview(progress).stage).toBe("ending-now");
   });
 
+  it("requires all ten canonical entries to be confirmed before completion", () => {
+    const verified = verifyChapterReview(reviewProgress());
+    expect(canCompleteChapterReview(verified.languageLog)).toBe(true);
+    expect(chapter01.languageLog.coreVocabulary.every((lemma) => {
+      const entry = verified.languageLog[lemma];
+      return entry.status === "CONFIRMED" && displayGloss(entry) === lexicon[lemma].canonicalGloss;
+    })).toBe(true);
+  });
+
   it("persists the restored water visual state", () => {
     const storage = new MemoryStorage();
     let progress = enterStage(createInitialProgress(), "terminal-aperi", collectMarkedLatin({}, "[[aperi]]"));
@@ -115,17 +149,19 @@ describe("AD ASTRA Chapter I", () => {
     expect(loadGame(storage).waterRestored).toBe(true);
   });
 
-  it("retains wrong-answer scaffolding and never reveals the operational answer", () => {
+  it("progressively reveals the terminal answer so the puzzle cannot dead-end", () => {
     expect(assessAquaAnswer("  A Q U A. ").correct).toBe(true);
-    expect(terminalScaffold("english", 0)).toMatchObject({ terminal: "IGNOTUM.", cras: "It remains stubbornly Latin." });
-    expect(terminalScaffold("other", 1).cras).toBe("Consider the system that is failing.");
-    expect(terminalScaffold("other", 2).cras).toBe("The recycler is dry.");
-    expect(terminalScaffold("other", 3).cras).toBe("You encountered the relevant word earlier.");
-    expect(terminalScaffold("other", 4).offerReview).toBe(true);
+    expect(terminalScaffold("english", 1)).toMatchObject({ terminal: "IGNOTUM.", cras: "The recycler was supposed to provide it." });
+    expect(terminalScaffold("other", 2).cras).toBe("Humans drink it.");
+    expect(terminalScaffold("other", 3)).toMatchObject({
+      cras: "Aqua means water. Enter aqua into the Master Computer.",
+      directReveal: true,
+    });
+    expect(terminalScaffold("other", 8).directReveal).toBe(true);
 
     const terminal = enterStage(createInitialProgress(), "terminal-question");
     const afterEnglish = recordTerminalError(terminal, "english");
-    expect(recordTerminalError(afterEnglish, "other").terminalAttempts).toBe(1);
+    expect(recordTerminalError(afterEnglish, "other").terminalAttempts).toBe(2);
   });
 
   it("round-trips the player name and Language Log", () => {
@@ -134,7 +170,7 @@ describe("AD ASTRA Chapter I", () => {
     progress = submitName(progress, "Alex");
     progress = { ...progress, languageLog: recordHypothesis(collectMarkedLatin({}, "[[aqua]]"), "aqua", "water") };
     saveGame(storage, progress);
-    expect(loadGame(storage)).toMatchObject({ playerName: "Alex", languageLog: { aqua: { guess: "water", status: "HYPOTHESIS" } } });
+    expect(loadGame(storage)).toMatchObject({ playerName: "Alex", languageLog: { aqua: { playerGuess: "water", status: "HYPOTHESIS" } } });
     storage.setItem(SAVE_KEY, JSON.stringify({ version: 2, stage: "title" }));
     expect(loadGame(storage).stage).toBe("crawl");
   });

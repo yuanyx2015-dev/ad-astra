@@ -19,12 +19,10 @@ export function assessAquaAnswer(value: string): AquaAssessment {
 
 export function terminalScaffold(kind: AquaAssessment["kind"], attempt: number) {
   const errors = chapter01.terminal.errors;
-  if (kind === "english") {
-    return { terminal: errors.englishTerminal, cras: errors.englishCras, offerReview: attempt >= 4 };
-  }
+  const hintIndex = Math.min(Math.max(attempt, 1), errors.hints.length) - 1;
   return {
-    terminal: "",
-    cras: errors.hints[Math.min(Math.max(attempt - 1, 0), errors.hints.length - 1)],
-    offerReview: attempt >= 4,
+    terminal: kind === "english" ? errors.englishTerminal : "",
+    cras: errors.hints[hintIndex],
+    directReveal: attempt >= errors.hints.length,
   };
 }

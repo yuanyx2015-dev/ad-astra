@@ -31,18 +31,23 @@ export type Stage =
 
 export type RobotMood = "neutral" | "amused" | "concerned" | "annoyed";
 export type LogStatus = "UNKNOWN" | "HYPOTHESIS" | "CONFIRMED" | "CONTRADICTED";
+export type GlossMatch = "exact" | "close" | "incorrect";
 
 export interface LanguageLogEntry {
   lemma: string;
-  guess: string;
+  playerGuess: string;
+  canonicalGloss: string;
   status: LogStatus;
   evidenceKnown: boolean;
+  canonicalRevealed: boolean;
+  helpLevel: number;
+  matchQuality: GlossMatch | null;
 }
 
 export type LanguageLog = Record<string, LanguageLogEntry>;
 
 export interface GameProgress {
-  version: 3;
+  version: 4;
   stage: Stage;
   playerName: string;
   languageLog: LanguageLog;

@@ -4,7 +4,7 @@ import { FormEvent, Fragment, type ReactNode, useEffect, useMemo, useRef, useSta
 import { assessAquaAnswer, terminalScaffold } from "../game/assessment";
 import { robotAssets, robotMood } from "../game/character";
 import { beatForStage, chapter01 } from "../game/content/chapter-01";
-import { parseLatinMarkup } from "../game/language";
+import { displayGloss, parseLatinMarkup } from "../game/language";
 import {
   activateControl,
   advance,
@@ -17,6 +17,7 @@ import {
   createInitialProgress,
   recallAqua,
   recordTerminalError,
+  requestReviewHelp,
   skipIntro,
   submitAquaHypothesis,
   submitName,
@@ -183,9 +184,6 @@ export default function Home() {
               {(questionHelp || scaffold) && (
                 <CrasAside mood={scaffold ? "annoyed" : "neutral"}>
                   {scaffold?.cras ?? chapter01.terminal.helpResponse}
-                  {scaffold?.offerReview && (
-                    <button className="review-button" onClick={() => { setLogOpen(true); focusTerminal(); }}>{chapter01.terminal.errors.reviewLabel}</button>
-                  )}
                 </CrasAside>
               )}
             </>
@@ -288,6 +286,7 @@ export default function Home() {
           onOpen={() => setLogOpen(true)}
           onClose={() => setLogOpen(false)}
           onSave={(lemma, guess) => setProgress((current) => updateLanguageLog(current, lemma, guess))}
+          onRequestHelp={(lemma) => setProgress((current) => requestReviewHelp(current, lemma))}
           onVerify={() => setProgress((current) => verifyChapterReview(current))}
           onContinue={() => { setProgress((current) => completeChapterReview(current)); setLogOpen(false); }}
         />
@@ -313,13 +312,14 @@ function CrasAside({ mood, children }: { mood: RobotMood; children: ReactNode })
   );
 }
 
-function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave, onVerify, onContinue }: {
+function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave, onRequestHelp, onVerify, onContinue }: {
   entries: LanguageLogEntry[];
   open: boolean;
   reviewMode: boolean;
   onOpen: () => void;
   onClose: () => void;
   onSave: (lemma: string, guess: string) => void;
+  onRequestHelp: (lemma: string) => void;
   onVerify: () => void;
   onContinue: () => void;
 }) {
@@ -357,8 +357,9 @@ function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave,
               key={entry.lemma}
               entry={entry}
               reviewMode={reviewMode}
-              hint={chapter01.languageLog.crasHints[entry.lemma as keyof typeof chapter01.languageLog.crasHints]}
+              hints={chapter01.languageLog.crasHints[entry.lemma as keyof typeof chapter01.languageLog.crasHints]}
               onSave={onSave}
+              onRequestHelp={onRequestHelp}
             />
           ))}
         </div>
@@ -373,35 +374,51 @@ function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave,
   );
 }
 
-function LogEntryRow({ entry, reviewMode, hint, onSave }: {
+function LogEntryRow({ entry, reviewMode, hints, onSave, onRequestHelp }: {
   entry: LanguageLogEntry;
   reviewMode: boolean;
-  hint?: string;
+  hints?: readonly string[];
   onSave: (lemma: string, guess: string) => void;
+  onRequestHelp: (lemma: string) => void;
 }) {
-  const [draft, setDraft] = useState(entry.guess);
-  const [showHint, setShowHint] = useState(false);
-  useEffect(() => setDraft(entry.guess), [entry.guess]);
+  const [draft, setDraft] = useState(entry.playerGuess);
+  useEffect(() => setDraft(entry.playerGuess), [entry.playerGuess]);
+  const helpText = hints && entry.helpLevel > 0 ? hints[Math.min(entry.helpLevel, hints.length) - 1] : "";
+  const closeFeedback = chapter01.languageLog.closeFeedback
+    .replace("{lemma}", entry.lemma)
+    .replace("{canonicalGloss}", entry.canonicalGloss);
   return (
     <form className={`log-entry status-${entry.status.toLowerCase()}`} onSubmit={(event) => { event.preventDefault(); onSave(entry.lemma, draft); }}>
       <div className="log-entry-heading"><strong>{entry.lemma}</strong><span>{chapter01.languageLog.statusLabels[entry.status]}</span></div>
-      <div className="log-entry-edit">
-        <input
-          value={draft}
-          onChange={(event) => {
-            const value = event.target.value;
-            setDraft(value);
-            if (reviewMode) onSave(entry.lemma, value);
-          }}
-          aria-label={`English guess for ${entry.lemma}`}
-          placeholder={chapter01.languageLog.guessPlaceholder}
-        />
-        {!reviewMode && <button>{chapter01.languageLog.saveGuess}</button>}
-      </div>
-      {reviewMode && entry.status === "CONTRADICTED" && hint && (
+      {entry.status === "CONFIRMED" ? (
+        <div className="confirmed-gloss">{displayGloss(entry)}</div>
+      ) : (
+        <div className="log-entry-edit">
+          <input
+            value={draft}
+            onChange={(event) => {
+              const value = event.target.value;
+              setDraft(value);
+              if (reviewMode) onSave(entry.lemma, value);
+            }}
+            aria-label={`English guess for ${entry.lemma}`}
+            placeholder={chapter01.languageLog.guessPlaceholder}
+          />
+          {!reviewMode && <button>{chapter01.languageLog.saveGuess}</button>}
+        </div>
+      )}
+      {entry.status === "CONFIRMED" && entry.matchQuality === "close" && <p className="log-feedback">{closeFeedback}</p>}
+      {reviewMode && entry.status !== "CONFIRMED" && hints && (
         <>
-          <button type="button" className="log-hint-action" onClick={() => setShowHint((current) => !current)}>{chapter01.languageLog.askCras}</button>
-          {showHint && <p className="log-hint"><strong>CRAS</strong>{hint}</p>}
+          <button
+            type="button"
+            className="log-hint-action"
+            disabled={entry.helpLevel >= hints.length}
+            onClick={() => onRequestHelp(entry.lemma)}
+          >
+            {entry.helpLevel >= hints.length ? chapter01.languageLog.meaningRevealed : chapter01.languageLog.askCras}
+          </button>
+          {helpText && <p className="log-hint"><strong>CRAS</strong>{helpText}</p>}
         </>
       )}
     </form>

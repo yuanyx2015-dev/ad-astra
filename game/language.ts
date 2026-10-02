@@ -1,5 +1,5 @@
 import { lexicon } from "./content/lexicon";
-import type { LanguageLog, LanguageLogEntry } from "./types";
+import type { GlossMatch, LanguageLog, LanguageLogEntry } from "./types";
 
 export interface MarkupSegment {
   text: string;
@@ -33,7 +33,7 @@ export function collectMarkedLatin(log: LanguageLog, text: string): LanguageLog 
   for (const { lemma } of parseLatinMarkup(text)) {
     if (!lemma || next[lemma]) continue;
     if (next === log) next = { ...log };
-    next[lemma] = { lemma, guess: "", status: "UNKNOWN", evidenceKnown: false };
+    next[lemma] = createLogEntry(lemma);
   }
   return next;
 }
@@ -47,47 +47,75 @@ export function ensureLemmas(log: LanguageLog, lemmas: readonly string[]): Langu
   for (const lemma of lemmas) {
     if (next[lemma]) continue;
     if (next === log) next = { ...log };
-    next[lemma] = { lemma, guess: "", status: "UNKNOWN", evidenceKnown: false };
+    next[lemma] = createLogEntry(lemma);
   }
   return next;
 }
 
-export function isAcceptedGloss(lemma: string, guess: string): boolean {
+export function createLogEntry(lemma: string): LanguageLogEntry {
+  return {
+    lemma,
+    playerGuess: "",
+    canonicalGloss: lexicon[lemma]?.canonicalGloss ?? "",
+    status: "UNKNOWN",
+    evidenceKnown: false,
+    canonicalRevealed: false,
+    helpLevel: 0,
+    matchQuality: null,
+  };
+}
+
+export function assessGloss(lemma: string, guess: string): GlossMatch {
+  const item = lexicon[lemma];
   const normalized = normalizeGloss(guess);
-  return (lexicon[lemma]?.acceptedGlosses ?? []).some((gloss) => normalizeGloss(gloss) === normalized);
+  if (!item || !normalized) return "incorrect";
+  const canonicalMeanings = item.canonicalGloss.split(";").map(normalizeGloss);
+  if (canonicalMeanings.includes(normalized)) return "exact";
+  return item.acceptedGlosses.some((gloss) => normalizeGloss(gloss) === normalized) ? "close" : "incorrect";
+}
+
+export function isAcceptedGloss(lemma: string, guess: string): boolean {
+  return assessGloss(lemma, guess) !== "incorrect";
 }
 
 export function recordHypothesis(log: LanguageLog, lemma: string, guess: string): LanguageLog {
   const current = log[lemma];
   if (!current) return log;
   const trimmed = guess.trim();
+  const matchQuality = trimmed ? assessGloss(lemma, trimmed) : null;
   let status: LanguageLogEntry["status"] = trimmed ? "HYPOTHESIS" : "UNKNOWN";
-  if (trimmed && current.evidenceKnown) status = isAcceptedGloss(lemma, trimmed) ? "CONFIRMED" : "CONTRADICTED";
-  return { ...log, [lemma]: { ...current, guess: trimmed, status } };
+  if (trimmed && current.evidenceKnown) status = matchQuality !== "incorrect" ? "CONFIRMED" : "CONTRADICTED";
+  return { ...log, [lemma]: { ...current, playerGuess: trimmed, status, matchQuality } };
 }
 
 export function validateLemma(log: LanguageLog, lemma: string): LanguageLog {
   const current = log[lemma];
   if (!current) return log;
-  const status = current.guess
-    ? (isAcceptedGloss(lemma, current.guess) ? "CONFIRMED" : "CONTRADICTED")
+  const matchQuality = current.playerGuess ? assessGloss(lemma, current.playerGuess) : null;
+  const status = current.playerGuess
+    ? (matchQuality !== "incorrect" ? "CONFIRMED" : "CONTRADICTED")
     : "UNKNOWN";
-  return { ...log, [lemma]: { ...current, evidenceKnown: true, status } };
+  return { ...log, [lemma]: { ...current, evidenceKnown: true, status, matchQuality } };
 }
 
-export function revealMeaning(log: LanguageLog, lemma: string, gloss: string): LanguageLog {
+export function revealMeaning(log: LanguageLog, lemma: string): LanguageLog {
   const current = log[lemma];
   if (!current) return log;
-  const guess = current.guess || gloss;
+  const matchQuality = current.playerGuess ? assessGloss(lemma, current.playerGuess) : null;
   return {
     ...log,
     [lemma]: {
       ...current,
-      guess,
+      canonicalRevealed: true,
       evidenceKnown: true,
-      status: isAcceptedGloss(lemma, guess) ? "CONFIRMED" : "CONTRADICTED",
+      status: current.playerGuess ? (matchQuality !== "incorrect" ? "CONFIRMED" : "CONTRADICTED") : "UNKNOWN",
+      matchQuality,
     },
   };
+}
+
+export function displayGloss(entry: LanguageLogEntry): string {
+  return entry.status === "CONFIRMED" ? entry.canonicalGloss : entry.playerGuess;
 }
 
 export function unknownLemmas(log: LanguageLog): string[] {
