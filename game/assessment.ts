@@ -1,4 +1,6 @@
 import { chapter01 } from "./content/chapter-01";
+import { luxTask } from "./content/chapter-02";
+import type { Stage } from "./types";
 
 export interface AquaAssessment {
   correct: boolean;
@@ -24,5 +26,14 @@ export function terminalScaffold(kind: AquaAssessment["kind"], attempt: number) 
     terminal: kind === "english" ? errors.englishTerminal : "",
     cras: errors.hints[hintIndex],
     directReveal: attempt >= errors.hints.length,
+  };
+}
+
+export function assessLuxAnswer(stage: Stage, value: string) {
+  const task = luxTask(stage);
+  const normalized = value.trim().replace(/\.$/, "").trim().toLowerCase();
+  return {
+    correct: Boolean(task?.acceptedAnswers.includes(normalized)),
+    english: Boolean(task?.englishAnswers?.includes(normalized)),
   };
 }

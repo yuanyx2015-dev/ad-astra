@@ -1,9 +1,10 @@
 "use client";
 
 import { FormEvent, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { assessAquaAnswer, terminalScaffold } from "../game/assessment";
+import { assessAquaAnswer, assessLuxAnswer, terminalScaffold } from "../game/assessment";
 import { robotAssets, robotMood } from "../game/character";
 import { beatForStage, chapter01 } from "../game/content/chapter-01";
+import { chapter02, luxStep, luxTask } from "../game/content/chapter-02";
 import { displayGloss, parseLatinMarkup } from "../game/language";
 import {
   activateControl,
@@ -23,9 +24,15 @@ import {
   submitName,
   updateLanguageLog,
   verifyChapterReview,
+  chooseLuxDialogue,
+  isReviewStage,
+  requestLuxHelp,
+  reviewContent,
+  reviewHints,
+  submitLuxAction,
 } from "../game/progression";
 import { loadGame, saveGame } from "../game/storage";
-import type { GameProgress, LanguageLogEntry, RobotMood } from "../game/types";
+import type { GameProgress, LanguageLogEntry, RobotMood, Stage } from "../game/types";
 
 const terminalStages = new Set(["terminal-question", "terminal-correct", "terminal-aperi", "water-good"]);
 const gatedNarrativeStages = new Set(["name-prompt", "aqua-guess", "chapter-review", "chapter-end"]);
@@ -39,6 +46,7 @@ export default function Home() {
   const [questionHelp, setQuestionHelp] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [controlError, setControlError] = useState("");
+  const [luxEnglish, setLuxEnglish] = useState(false);
   const [prologuePhaseIndex, setProloguePhaseIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -52,8 +60,11 @@ export default function Home() {
   }, [hydrated, progress]);
 
   useEffect(() => {
-    if (progress.stage === "terminal-question") inputRef.current?.focus();
-    if (progress.stage === "chapter-review") setLogOpen(true);
+    if (progress.stage === "terminal-question" || luxTask(progress.stage)?.mode === "text") inputRef.current?.focus();
+    if (isReviewStage(progress.stage)) setLogOpen(true);
+    if (luxStep(progress.stage)) window.scrollTo(0, 0);
+    setAnswer("");
+    setLuxEnglish(false);
   }, [progress.stage]);
 
   useEffect(() => {
@@ -71,7 +82,9 @@ export default function Home() {
   }, [progress.stage, prologuePhaseIndex]);
 
   const mood = robotMood(progress);
-  const beat = beatForStage(progress.stage);
+  const lux = luxStep(progress.stage);
+  const task = luxTask(progress.stage);
+  const beat = lux ?? beatForStage(progress.stage);
   const beatText = beat?.text.replaceAll("{name}", progress.playerName || "Human") ?? "";
   const scaffold = useMemo(() => {
     if (!progress.lastTerminalError) return null;
@@ -156,7 +169,44 @@ export default function Home() {
   }
 
   let surface: ReactNode;
-  if (terminalStages.has(progress.stage)) {
+  if (task) {
+    const helpLevel = progress.chapter2Help[progress.stage] ?? 0;
+    const hint = helpLevel > 0 ? task.hints[Math.min(helpLevel, task.hints.length) - 1] : "";
+    surface = (
+      <main className="terminal-stage lux-terminal">
+        <section className="terminal-console" aria-label="Master Computer terminal">
+          <header>{chapter01.terminal.heading}</header>
+          <div className="terminal-copy">
+            {task.lines.map((line) => <p key={line}><MarkedText text={line} /></p>)}
+          </div>
+          <p className="task-context">{task.prompt}</p>
+          {task.mode === "text" ? (
+            <form className="terminal-input" onSubmit={(event) => {
+              event.preventDefault();
+              setLuxEnglish(assessLuxAnswer(progress.stage, answer).english);
+              setProgress((current) => submitLuxAction(current, answer));
+              focusTerminal();
+            }}>
+              <span aria-hidden="true">&gt;</span>
+              <input ref={inputRef} value={answer} onChange={(event) => setAnswer(event.target.value)} aria-label={chapter02.ui.inputLabel} autoCapitalize="none" autoComplete="off" spellCheck={false} />
+              <button type="submit" className="quiet-action">{chapter02.ui.submit}</button>
+            </form>
+          ) : (
+            <div className={`control-bank lux-controls ${progress.stage === "lux-modules" ? "module-bank" : ""}`} aria-label={progress.stage === "lux-modules" ? chapter02.ui.cabinetLabel : chapter02.ui.circuitLabel}>
+              {task.controls?.map((control) => (
+                <button key={control.id} onClick={() => setProgress((current) => submitLuxAction(current, control.id))}>
+                  <span aria-hidden="true">{control.symbol}</span>
+                  <strong>{control.label}</strong><small>{control.detail}</small>
+                </button>
+              ))}
+            </div>
+          )}
+          <button className="quiet-action" onClick={() => { setProgress((current) => requestLuxHelp(current)); focusTerminal(); }}>{chapter02.ui.help}</button>
+          {(hint || luxEnglish) && <CrasAside mood="neutral"><span role="status">{luxEnglish ? `${task.englishFeedback}\n` : ""}{hint}</span></CrasAside>}
+        </section>
+      </main>
+    );
+  } else if (terminalStages.has(progress.stage)) {
     surface = (
       <main className="terminal-stage">
         <section className="terminal-console" aria-label="Master Computer terminal">
@@ -229,16 +279,21 @@ export default function Home() {
         </section>
       </main>
     );
-  } else if (progress.stage === "chapter-end") {
+  } else if (progress.stage === "chapter-end" || progress.stage === "lux-end") {
     surface = (
       <main className="chapter-end-screen">
-        <div>{chapter01.chapterEnd}</div>
+        <div>
+          <p>{progress.stage === "chapter-end" ? chapter01.chapterEnd : chapter02.title}</p>
+          {progress.stage === "chapter-end" ? (
+            <button className="continue" onClick={() => setProgress((current) => advance(current))}>{chapter02.startLabel}</button>
+          ) : <p className="chapter-completion">{chapter02.ui.completion}</p>}
+        </div>
       </main>
     );
   } else {
     surface = (
       <main className="narrative-stage">
-        <section className={`habitat-visual ${progress.waterRestored ? "restored" : "damaged"}`} aria-label="Habitat interior">
+        <section className={`habitat-visual ${progress.waterRestored ? "restored" : "damaged"} ${lux ? (progress.powerRestored ? "power-restored" : "emergency-power") : ""}`} aria-label={lux ? (progress.powerRestored ? chapter02.scene.restoredLabel : chapter02.scene.emergencyLabel) : "Habitat interior"}>
           <div className="habitat-vignette" />
           <img
             className="water-system"
@@ -251,6 +306,13 @@ export default function Home() {
         <section className="dialogue-surface" aria-live="polite">
           <div className="speaker-label">{beat?.speaker ?? "CRAS"}</div>
           <p className="dialogue-text"><MarkedText text={beatText} /></p>
+          {lux?.card && <section className="story-terminal" aria-label={lux.id === "lux-communication" ? chapter02.ui.maintenanceCard : chapter01.terminal.heading}>
+            <header>{lux.id === "lux-communication" ? chapter02.ui.maintenanceCard : chapter01.terminal.heading}</header>
+            {lux.card.map((line) => <p key={line}><MarkedText text={line} /></p>)}
+          </section>}
+          {lux?.choices && <div className="narrative-choices">
+            {lux.choices.map((choice) => <button key={choice.next} onClick={() => setProgress((current) => chooseLuxDialogue(current, choice.next))}>{choice.label}</button>)}
+          </div>}
 
           {progress.stage === "name-prompt" && (
             <form className="story-input" onSubmit={submitPlayerName}>
@@ -266,8 +328,8 @@ export default function Home() {
             </form>
           )}
 
-          {!gatedNarrativeStages.has(progress.stage) && (
-            <button className="continue" onClick={() => setProgress((current) => advance(current))}>{chapter01.continueLabel}</button>
+          {!gatedNarrativeStages.has(progress.stage) && !lux?.kind && (
+            <button className="continue" onClick={() => setProgress((current) => advance(current))}>{progress.stage === "lux-correct" ? chapter02.ui.openCabinet : chapter01.continueLabel}</button>
           )}
         </section>
       </main>
@@ -281,8 +343,9 @@ export default function Home() {
       {logUnlocked && (
         <LanguageLogDrawer
           entries={Object.values(progress.languageLog)}
+          stage={progress.stage}
           open={logOpen}
-          reviewMode={progress.stage === "chapter-review"}
+          reviewMode={isReviewStage(progress.stage)}
           onOpen={() => setLogOpen(true)}
           onClose={() => setLogOpen(false)}
           onSave={(lemma, guess) => setProgress((current) => updateLanguageLog(current, lemma, guess))}
@@ -312,8 +375,9 @@ function CrasAside({ mood, children }: { mood: RobotMood; children: ReactNode })
   );
 }
 
-function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave, onRequestHelp, onVerify, onContinue }: {
+function LanguageLogDrawer({ entries, stage, open, reviewMode, onOpen, onClose, onSave, onRequestHelp, onVerify, onContinue }: {
   entries: LanguageLogEntry[];
+  stage: Stage;
   open: boolean;
   reviewMode: boolean;
   onOpen: () => void;
@@ -324,14 +388,15 @@ function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave,
   onContinue: () => void;
 }) {
   const languageLog = Object.fromEntries(entries.map((entry) => [entry.lemma, entry]));
+  const review = reviewContent(stage);
   const visibleEntries = reviewMode
-    ? chapter01.languageLog.coreVocabulary
+    ? review.coreVocabulary
         .map((lemma) => languageLog[lemma])
         .filter((entry): entry is LanguageLogEntry => Boolean(entry))
     : entries;
-  const counts = chapterReviewCounts(languageLog);
-  const canVerify = canVerifyChapterReview(languageLog);
-  const canContinue = canCompleteChapterReview(languageLog);
+  const counts = chapterReviewCounts(languageLog, stage);
+  const canVerify = canVerifyChapterReview(languageLog, stage);
+  const canContinue = canCompleteChapterReview(languageLog, stage);
   const summary = chapter01.languageLog.reviewSummary;
   return (
     <>
@@ -342,7 +407,7 @@ function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave,
           <div><span>{reviewMode ? chapter01.languageLog.reviewTitle : chapter01.languageLog.title}</span><small>{entries.length} WORDS</small></div>
           {!reviewMode && <button onClick={onClose}>{chapter01.languageLog.close}</button>}
         </header>
-        {reviewMode && <p className="review-instruction">{chapter01.languageLog.reviewInstruction}</p>}
+        {reviewMode && <p className="review-instruction">{review.reviewInstruction}</p>}
         {reviewMode && (
           <div className="review-summary" aria-live="polite">
             <span>{summary.discovered.replace("{count}", String(counts.discovered))}</span>
@@ -357,16 +422,20 @@ function LanguageLogDrawer({ entries, open, reviewMode, onOpen, onClose, onSave,
               key={entry.lemma}
               entry={entry}
               reviewMode={reviewMode}
-              hints={chapter01.languageLog.crasHints[entry.lemma as keyof typeof chapter01.languageLog.crasHints]}
+              hints={reviewMode || stage.startsWith("lux-") ? reviewHints(entry.lemma) : undefined}
               onSave={onSave}
               onRequestHelp={onRequestHelp}
             />
           ))}
+          {reviewMode && stage.startsWith("lux-") && <>
+            <p className="review-instruction">{chapter02.ui.otherWords}</p>
+            {entries.filter((entry) => !(review.coreVocabulary as readonly string[]).includes(entry.lemma)).map((entry) => <LogEntryRow key={entry.lemma} entry={entry} reviewMode={false} hints={reviewHints(entry.lemma)} onSave={onSave} onRequestHelp={onRequestHelp} />)}
+          </>}
         </div>
         {reviewMode && (
           <div className="review-actions">
             <button className="review-verify" disabled={!canVerify || canContinue} onClick={onVerify}>{chapter01.languageLog.reviewVerify}</button>
-            <button className="review-continue" disabled={!canContinue} onClick={onContinue}>{chapter01.languageLog.reviewContinue}</button>
+            <button className="review-continue" disabled={!canContinue} onClick={onContinue}>{review.reviewContinue}</button>
           </div>
         )}
       </aside>}
@@ -408,7 +477,7 @@ function LogEntryRow({ entry, reviewMode, hints, onSave, onRequestHelp }: {
         </div>
       )}
       {entry.status === "CONFIRMED" && entry.matchQuality === "close" && <p className="log-feedback">{closeFeedback}</p>}
-      {reviewMode && entry.status !== "CONFIRMED" && hints && (
+      {entry.status !== "CONFIRMED" && hints && (
         <>
           <button
             type="button"

@@ -179,6 +179,19 @@ button { touch-action:manipulation; }
 }
 .habitat-visual.damaged .habitat-vignette { background:linear-gradient(180deg,rgba(58,4,0,.23),rgba(0,0,0,.46) 48%,rgba(3,8,10,.94)); }
 .habitat-visual.restored .habitat-vignette { background:linear-gradient(180deg,rgba(29,86,87,.03),rgba(0,0,0,.17) 48%,rgba(3,8,10,.78)); }
+.habitat-visual.emergency-power .habitat-vignette { background:linear-gradient(180deg,rgba(0,0,0,.58),rgba(0,0,0,.65) 48%,rgba(3,8,10,.9)); animation:emergency-light 5s ease-in-out infinite; }
+.habitat-visual.power-restored .habitat-vignette { background:linear-gradient(180deg,rgba(239,203,132,.1),transparent 48%,rgba(3,8,10,.38)); }
+@keyframes emergency-light { 0%,80%,100% { opacity:1; } 86% { opacity:.76; } 92% { opacity:.95; } }
+.story-terminal { margin-top:24px; padding:18px; border:1px solid var(--line); background:#030e10; font-family:"Courier New",monospace; font-size:1rem; }
+.story-terminal header { color:var(--muted); font-size:.875rem; margin-bottom:12px; }
+.story-terminal p { margin:8px 0; }
+.task-context { max-width:680px; font-family:Georgia,serif; font-size:1.1rem; line-height:1.55; color:#d5dfdb; }
+.lux-controls { grid-template-columns:repeat(2,1fr); }
+.lux-controls.module-bank { grid-template-columns:1fr; }
+.lux-controls button { padding:14px; }
+.lux-controls button strong { font-size:1rem; font-weight:400; }
+.lux-controls button small { font-size:.875rem; }
+.chapter-completion { font-size:1rem; letter-spacing:0; color:var(--muted); }
 .water-system {
   position:absolute;
   z-index:3;
@@ -415,7 +428,7 @@ button { touch-action:manipulation; }
 .chapter-end-screen { display:grid; place-items:center; color:var(--ink); font-size:clamp(1.4rem,3.5vw,2.8rem); letter-spacing:.2em; text-align:center; }
 
 @media (max-width:760px) {
-  .narrative-stage { grid-template-columns:1fr; grid-template-rows:30vh 70vh; }
+  .narrative-stage { grid-template-columns:1fr; grid-template-rows:30vh minmax(70vh,auto); }
   .habitat-visual { min-height:30vh; border-right:0; border-bottom:1px solid var(--line); background-position:center 48%; }
   .cras-figure { left:auto; right:4vw; bottom:-2vh; width:min(35vw,170px); transform:none; }
   .water-system { top:auto; bottom:-4vh; left:3vw; width:min(38vw,175px); transform:none; }
@@ -426,8 +439,12 @@ button { touch-action:manipulation; }
   .terminal-stage { padding:0; }
   .terminal-console { width:100%; min-height:100vh; border:0; padding:28px 22px; }
   .terminal-console>header { margin-bottom:38px; }
+  .lux-terminal .terminal-console { padding-top:76px; }
   .control-bank { grid-template-columns:1fr; gap:8px; margin-top:26px; }
   .control-bank button { min-height:72px; flex-direction:row; }
+  .lux-controls { grid-template-columns:1fr; }
+  .lux-controls button { flex-wrap:wrap; }
+  .lux-controls button small { flex-basis:100%; }
   .review-panel { inset:64px 14px 20px; padding:24px; }
   .cras-aside { grid-template-columns:64px 1fr; gap:12px; }
   .cras-aside img { width:64px; height:64px; }
@@ -443,4 +460,5 @@ button { touch-action:manipulation; }
   * { scroll-behavior:auto!important; transition:none!important; }
   .crawl-track { animation-duration:1ms!important; transform:none; }
   .prologue-alert,.prologue-impact,.impact-screen { animation:none!important; }
+  .habitat-visual.emergency-power .habitat-vignette { animation:none!important; }
 }

@@ -27,7 +27,8 @@ export type Stage =
   | "ending-convenient"
   | "ending-defense"
   | "ending-power"
-  | "chapter-end";
+  | "chapter-end"
+  | `lux-${string}`;
 
 export type RobotMood = "neutral" | "amused" | "concerned" | "annoyed";
 export type LogStatus = "UNKNOWN" | "HYPOTHESIS" | "CONFIRMED" | "CONTRADICTED";
@@ -55,5 +56,7 @@ export interface GameProgress {
   lastTerminalError: "english" | "other" | null;
   askedAperi: boolean;
   waterRestored: boolean;
+  powerRestored: boolean;
+  chapter2Help: Record<string, number>;
   lastSavedAt: number;
 }
