@@ -1,3 +1,5 @@
+import { chapter02Lexicon } from "./chapter-02-lexicon";
+
 export interface LexiconItem {
   lemma: string;
   canonicalGloss: string;
@@ -5,6 +7,7 @@ export interface LexiconItem {
 }
 
 export const lexicon: Record<string, LexiconItem> = {
+  ...chapter02Lexicon,
   salve: { lemma: "salve", canonicalGloss: "hello; greetings", acceptedGlosses: ["hello", "hi", "greeting", "greetings", "hail"] },
   aqua: { lemma: "aqua", canonicalGloss: "water", acceptedGlosses: ["water"] },
   deest: {

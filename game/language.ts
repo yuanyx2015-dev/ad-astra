@@ -70,7 +70,7 @@ export function assessGloss(lemma: string, guess: string): GlossMatch {
   const normalized = normalizeGloss(guess);
   if (!item || !normalized) return "incorrect";
   const canonicalMeanings = item.canonicalGloss.split(";").map(normalizeGloss);
-  if (canonicalMeanings.includes(normalized)) return "exact";
+  if (canonicalMeanings.includes(normalized) || normalizeGloss(item.canonicalGloss) === normalized) return "exact";
   return item.acceptedGlosses.some((gloss) => normalizeGloss(gloss) === normalized) ? "close" : "incorrect";
 }
 

@@ -1,4 +1,6 @@
 import { chapter01, markedTextsForStage } from "./content/chapter-01";
+import { chapter02, luxMarkedTexts, luxStep, luxTask } from "./content/chapter-02";
+import { assessLuxAnswer } from "./assessment";
 import { collectMarkedTexts, ensureLemmas, recordHypothesis, revealMeaning, validateLemma } from "./language";
 import type { GameProgress, LanguageLog, Stage } from "./types";
 
@@ -9,6 +11,7 @@ export const stageOrder: Stage[] = [
   "return-water", "chapter-review", "ending-now", "ending-crashed", "ending-noticed",
   "ending-observant", "ending-why", "ending-log", "ending-convenient", "ending-defense",
   "ending-power", "chapter-end",
+  ...chapter02.steps.map((step) => step.id),
 ];
 
 export function createInitialProgress(): GameProgress {
@@ -21,13 +24,15 @@ export function createInitialProgress(): GameProgress {
     lastTerminalError: null,
     askedAperi: false,
     waterRestored: false,
+    powerRestored: false,
+    chapter2Help: {},
     lastSavedAt: Date.now(),
   };
 }
 
 export function enterStage(progress: GameProgress, stage: Stage, languageLog = progress.languageLog): GameProgress {
-  let nextLog = collectMarkedTexts(languageLog, markedTextsForStage(stage));
-  if (stage === "chapter-review") nextLog = ensureLemmas(nextLog, chapter01.languageLog.coreVocabulary);
+  let nextLog = collectMarkedTexts(languageLog, [...markedTextsForStage(stage), ...luxMarkedTexts(stage)]);
+  if (isReviewStage(stage)) nextLog = ensureLemmas(nextLog, reviewContent(stage).coreVocabulary);
   return {
     ...progress,
     stage,
@@ -41,10 +46,15 @@ export function nextStage(stage: Stage): Stage {
 }
 
 export function advance(progress: GameProgress): GameProgress {
-  if (["name-prompt", "aqua-guess", "terminal-question", "terminal-aperi", "chapter-review", "chapter-end"].includes(progress.stage)) return progress;
+  if (progress.stage === "chapter-end") {
+    if (!progress.waterRestored || !canCompleteChapterReview(progress.languageLog)) return progress;
+    return enterStage(progress, "lux-start");
+  }
+  const step = luxStep(progress.stage);
+  if (step?.kind || ["name-prompt", "aqua-guess", "terminal-question", "terminal-aperi", "chapter-review"].includes(progress.stage)) return progress;
   let log = progress.languageLog;
   if (progress.stage === "salve-explain") log = revealMeaning(log, "salve");
-  return enterStage(progress, nextStage(progress.stage), log);
+  return enterStage(progress, step?.next ?? nextStage(progress.stage), log);
 }
 
 export function completePrologue(progress: GameProgress): GameProgress {
@@ -66,6 +76,7 @@ export function submitAquaHypothesis(progress: GameProgress, guess: string): Gam
 }
 
 export function updateLanguageLog(progress: GameProgress, lemma: string, guess: string): GameProgress {
+  if (progress.languageLog[lemma]?.status === "CONFIRMED") return progress;
   return { ...progress, languageLog: recordHypothesis(progress.languageLog, lemma, guess), lastSavedAt: Date.now() };
 }
 
@@ -107,14 +118,32 @@ export function activateControl(progress: GameProgress, control: "air" | "water"
   );
 }
 
-export function canVerifyChapterReview(languageLog: LanguageLog): boolean {
-  return chapter01.languageLog.coreVocabulary.every((lemma) => Boolean(languageLog[lemma]?.playerGuess.trim()));
+export function isReviewStage(stage: Stage): boolean {
+  return stage === "chapter-review" || stage === "lux-review";
+}
+
+export function reviewContent(stage: Stage = "chapter-review") {
+  return stage.startsWith("lux-") ? {
+    ...chapter01.languageLog,
+    coreVocabulary: chapter02.coreVocabulary,
+    crasHints: chapter02.crasHints,
+    reviewInstruction: chapter02.ui.reviewInstruction,
+    reviewContinue: chapter02.ui.reviewContinue,
+  } : chapter01.languageLog;
+}
+
+export function reviewHints(lemma: string): readonly string[] | undefined {
+  return (chapter01.languageLog.crasHints as Record<string, readonly string[]>)[lemma] ?? chapter02.crasHints[lemma];
+}
+
+export function canVerifyChapterReview(languageLog: LanguageLog, stage: Stage = "chapter-review"): boolean {
+  return reviewContent(stage).coreVocabulary.every((lemma) => languageLog[lemma]?.status === "CONFIRMED" || Boolean(languageLog[lemma]?.playerGuess.trim()));
 }
 
 export function requestReviewHelp(progress: GameProgress, lemma: string): GameProgress {
-  if (progress.stage !== "chapter-review") return progress;
+  if (!isReviewStage(progress.stage) && !progress.stage.startsWith("lux-")) return progress;
   const current = progress.languageLog[lemma];
-  const hints = chapter01.languageLog.crasHints[lemma as keyof typeof chapter01.languageLog.crasHints];
+  const hints = reviewHints(lemma);
   if (!current || current.status === "CONFIRMED" || !hints) return progress;
   const helpLevel = Math.min(current.helpLevel + 1, hints.length);
   const languageLog = {
@@ -134,31 +163,57 @@ export function requestReviewHelp(progress: GameProgress, lemma: string): GamePr
 }
 
 export function verifyChapterReview(progress: GameProgress): GameProgress {
-  if (progress.stage !== "chapter-review" || !canVerifyChapterReview(progress.languageLog)) return progress;
-  const languageLog = chapter01.languageLog.coreVocabulary.reduce(validateLemma, progress.languageLog);
+  if (!isReviewStage(progress.stage) || !canVerifyChapterReview(progress.languageLog, progress.stage)) return progress;
+  const languageLog = reviewContent(progress.stage).coreVocabulary.reduce((log, lemma) => log[lemma]?.status === "CONFIRMED" ? log : validateLemma(log, lemma), progress.languageLog);
   return { ...progress, languageLog, lastSavedAt: Date.now() };
 }
 
-export function chapterReviewCounts(languageLog: LanguageLog) {
-  const entries = chapter01.languageLog.coreVocabulary
+export function chapterReviewCounts(languageLog: LanguageLog, stage: Stage = "chapter-review") {
+  const vocabulary = reviewContent(stage).coreVocabulary;
+  const entries = vocabulary
     .map((lemma) => languageLog[lemma])
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
   const confirmed = entries.filter((entry) => entry.status === "CONFIRMED").length;
   return {
     discovered: entries.length,
     confirmed,
-    revision: chapter01.languageLog.coreVocabulary.length - confirmed,
+    revision: vocabulary.length - confirmed,
   };
 }
 
-export function canCompleteChapterReview(languageLog: LanguageLog): boolean {
-  return chapter01.languageLog.coreVocabulary.every((lemma) => {
+export function canCompleteChapterReview(languageLog: LanguageLog, stage: Stage = "chapter-review"): boolean {
+  return reviewContent(stage).coreVocabulary.every((lemma) => {
     const entry = languageLog[lemma];
     return entry?.status === "CONFIRMED" && Boolean(entry.canonicalGloss);
   });
 }
 
 export function completeChapterReview(progress: GameProgress): GameProgress {
-  if (progress.stage !== "chapter-review" || !canCompleteChapterReview(progress.languageLog)) return progress;
+  if (!isReviewStage(progress.stage) || !canCompleteChapterReview(progress.languageLog, progress.stage)) return progress;
+  if (progress.stage === "lux-review") {
+    if (!progress.waterRestored || !progress.powerRestored || !canCompleteChapterReview(progress.languageLog)) return progress;
+    return enterStage(progress, "lux-room");
+  }
   return enterStage(progress, "ending-now");
+}
+
+export function chooseLuxDialogue(progress: GameProgress, next: Stage): GameProgress {
+  const step = luxStep(progress.stage);
+  if (step?.kind !== "choice" || !step.choices?.some((choice) => choice.next === next)) return progress;
+  return enterStage(progress, next);
+}
+
+export function requestLuxHelp(progress: GameProgress): GameProgress {
+  const task = luxTask(progress.stage);
+  if (!task) return progress;
+  const count = Math.min((progress.chapter2Help[progress.stage] ?? 0) + 1, task.hints.length);
+  return { ...progress, chapter2Help: { ...progress.chapter2Help, [progress.stage]: count }, lastSavedAt: Date.now() };
+}
+
+export function submitLuxAction(progress: GameProgress, answer: string): GameProgress {
+  const task = luxTask(progress.stage);
+  if (!task) return progress;
+  if (!assessLuxAnswer(progress.stage, answer).correct) return requestLuxHelp(progress);
+  // A wrong reset action is never executed: restored water is retained on every path.
+  return enterStage({ ...progress, powerRestored: task.restoresPower ? true : progress.powerRestored }, task.next);
 }
